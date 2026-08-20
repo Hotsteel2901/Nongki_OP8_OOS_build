@@ -37,18 +37,40 @@ runs:
         run: |
           cd $GITHUB_WORKSPACE
           echo "::group::[+] Starting git clone OOS vendor/devicetree..."
-          # OnePlus OOS 内核的 vendor symlink 指向 ../../../../../../vendor
-          # (从 device_kernel/arch/arm64/boot/dts 上溯 6 层 -> $GITHUB_WORKSPACE)
-          # 因此把 devicetree+oplus 源码放到 $GITHUB_WORKSPACE/vendor
+          # modules_and_devicetree 仓库同时包含:
+          #   vendor/  (oplus kernel modules + kona DTS + 19821 devicetree)
+          #   kernel/msm-4.19/techpack/  (camera/display/video 源码, OOS 官方内核缺失的部分)
           if [ -n "${{ env.VENDOR_SOURCE }}" ]; then
             git clone --depth=1 "${{ env.VENDOR_SOURCE }}" -b "${{ env.VENDOR_BRANCH }}" oos_vendor_tmp
+            # 1) vendor -> $GITHUB_WORKSPACE/vendor (内核 vendor symlink 6层上级)
             mv oos_vendor_tmp/vendor ./vendor
+            # 2) techpack -> 填充 OOS 官方内核的空 gitlink
+            for d in camera display video; do
+              if [ -d "oos_vendor_tmp/kernel/msm-4.19/techpack/$d" ]; then
+                rm -rf kernel/device_kernel/techpack/$d
+                cp -r oos_vendor_tmp/kernel/msm-4.19/techpack/$d kernel/device_kernel/techpack/$d
+                echo "[+] techpack/$d filled from modules_and_devicetree."
+              else
+                echo "[-] techpack/$d not found in modules_and_devicetree."
+                false
+              fi
+            done
             rm -rf oos_vendor_tmp
-            echo "[+] OOS vendor cloned."
+            echo "[+] OOS vendor + techpack cloned."
           else
             echo "[-] VENDOR_SOURCE not set."
             false
           fi
+
+          # 验证 techpack 子目录有 Makefile (可编译)
+          for d in camera display video; do
+            if [ -f "kernel/device_kernel/techpack/$d/Makefile" ]; then
+              echo "[+] techpack/$d/Makefile OK"
+            else
+              echo "[-] techpack/$d/Makefile MISSING"
+              false
+            fi
+          done
 
           # 验证关键 symlink 可解析 (OOS 构建前提)
           cd kernel/device_kernel
@@ -61,39 +83,6 @@ runs:
               false
             fi
           done
-
-      - name: Get OOS Techpack (from XTD kernel, official is empty gitlink)
-        shell: bash
-        run: |
-          # OOS 官方内核 techpack/camera, display, video 是空的 gitlink (未公开源码).
-          # 从社区 XTD kernel (ppajda oos13.1) 借用对应子目录源码填充, 保留官方 stub.
-          echo "::group::[+] Starting git clone OOS techpack..."
-          if [ -n "${{ env.TECHPACK_SOURCE }}" ]; then
-            git clone --depth=1 --filter=blob:none --sparse "${{ env.TECHPACK_SOURCE }}" -b "${{ env.TECHPACK_BRANCH }}" techpack_tmp
-            cd techpack_tmp
-            git sparse-checkout set techpack/camera techpack/display techpack/video
-            cd $GITHUB_WORKSPACE
-            # 移除 OOS 官方空 gitlink 目录, 用社区源码填充 camera/display/video
-            for d in camera display video; do
-              rm -rf kernel/device_kernel/techpack/$d
-              mv techpack_tmp/techpack/$d kernel/device_kernel/techpack/$d
-            done
-            rm -rf techpack_tmp
-            echo "[+] OOS techpack (camera/display/video) obtained from XTD kernel."
-          else
-            echo "[-] TECHPACK_SOURCE not set."
-            false
-          fi
-          # 验证 techpack 子目录有 Makefile (可编译)
-          for d in camera display video; do
-            if [ -f "kernel/device_kernel/techpack/$d/Makefile" ]; then
-              echo "[+] techpack/$d/Makefile OK"
-            else
-              echo "[-] techpack/$d/Makefile MISSING"
-              false
-            fi
-          done
-          echo "::endgroup::"
 
       - name: Get Kernel Arch
         shell: bash

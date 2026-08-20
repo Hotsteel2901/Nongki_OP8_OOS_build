@@ -16,15 +16,11 @@ env:
   KERNEL_SOURCE : "https://github.com/OnePlusOSS/android_kernel_oneplus_sm8250.git"
   KERNEL_BRANCH : "oneplus/sm8250_t_13.1_op8"
 
-  # OOS 官方 vendor/devicetree 仓库 (含 oplus 内核模块 + kona DTS + 19821 设备树)
+  # OOS 官方 vendor/devicetree 仓库 (含 oplus 内核模块 + kona DTS + 19821 设备树
+  # + kernel/msm-4.19/techpack 的 camera/display/video 源码)
   # symlink 指向 vendor/, 需按 OnePlus 官方目录布局放置
   VENDOR_SOURCE : "https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250.git"
   VENDOR_BRANCH : "oneplus/sm8250_t_13.1_op8"
-
-  # OOS 官方内核 techpack (camera/display/video/audio) 源码缺失 (gitlink 为空),
-  # 从社区 XTD kernel (ppajda, oos13.1) 借用完整 techpack 源码填充
-  TECHPACK_SOURCE : "https://github.com/ppajda/android_kernel_oneplus_sm8250.git"
-  TECHPACK_BRANCH : "oos13.1"
 
   CLANG_SOURCE : "https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-Linux-X64.tar.xz"
   CLANG_BRANCH : ""
