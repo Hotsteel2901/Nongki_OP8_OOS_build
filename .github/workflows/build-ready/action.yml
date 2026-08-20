@@ -1,0 +1,357 @@
+name: 'Preparation for the official start of the compilation steps.'
+
+runs:
+  using: 'composite'
+  steps:
+      - name: Get Kernel
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE
+
+          echo "::group::[+] Starting git clone kernel source code..."
+          git clone --recursive "${{ env.KERNEL_SOURCE }}" -b "${{ env.KERNEL_BRANCH }}" device_kernel --depth=1
+
+          if [[ -f "device_kernel/.gitmodules" ]]; then
+            cd device_kernel
+            git submodule init
+            git submodule update
+            cd ../
+            echo "[+] Detected GitModules."
+
+          fi
+          echo "::endgroup::"
+          echo "[+] Kernel source code is cloned."
+
+          # Get Kernel Version
+
+          KERNEL_VERSION=$(head -n 3 $GITHUB_WORKSPACE/device_kernel/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')
+          echo "KERNEL_VERSION=$(head -n 3 device_kernel/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')" >> $GITHUB_ENV
+          echo "FIRST_VERSION=$(echo "$KERNEL_VERSION" | awk -F '.' '{print $1}')" >> $GITHUB_ENV
+          echo "SECOND_VERSION=$(echo "$KERNEL_VERSION" | awk -F '.' '{print $2}')" >> $GITHUB_ENV
+
+      - name: Get Kernel Arch
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel
+
+          if [[ -d "arch/arm64/configs" ]]; then
+            echo "KERNEL_ARCH=arm64" >> $GITHUB_ENV
+
+          else
+            echo "[-] Non-ARM64 Devies not supported!"
+            false
+
+          fi
+
+      - name: Get Packing Tools
+        shell: bash
+        run: |
+          # Set ${{ env.PACK_METHOD }}
+
+          if [[ "${{ env.PACK_METHOD }}" == "Anykernel3" ]]; then
+            cd $GITHUB_WORKSPACE/device_kernel
+
+            if [[ -d "Anykernel3" ]]; then
+              echo "[+] Found Anykernel3 in Kernel!"
+
+            elif [[ "${{ env.AK3_SOURCE }}" == *"osm0sis/AnyKernel3.git" ]]; then
+              git clone "${{ env.AK3_SOURCE }}" -b "${{ env.AK3_BRANCH }}" Anykernel3
+              cd Anykernel3
+              git checkout dca9dc370838d919d56c1f59ec78b27a14a72c68
+              cd ../
+              echo "[+] Get Anykernel3 successfully!"
+
+            else
+              git clone "${{ env.AK3_SOURCE }}" -b "${{ env.AK3_BRANCH }}" Anykernel3 --depth=1
+
+            fi
+          elif [[ "${{ env.PACK_METHOD }}" == "MKBOOTIMG" ]] || [ "${{ env.DEFCONFIG_FROM_BOOT }}" == "true" ]; then
+            cd $GITHUB_WORKSPACE
+            git clone https://android.googlesource.com/platform/system/tools/mkbootimg $GITHUB_WORKSPACE/mkboottools -b main-kernel-build-2024 --depth=1
+            ${{ env.CURLX }} ${{ env.BOOT_SOURCE }} $GITHUB_WORKSPACE/boot_source_${{ env.DEVICE_NAME }}.img
+            echo "[+] Get MKBOOTIMG successfully!"
+            cd device_kernel
+
+          else
+            echo "[-] Need packing method! "
+            false
+
+          fi
+
+          echo "PACK_METHOD=${{ env.PACK_METHOD }}" >> $GITHUB_ENV
+
+      - name: Get DEFCONFIG
+        if: env.DEFCONFIG_SOURCE != '' || env.DEFCONFIG_FROM_BOOT == 'true'
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel
+
+          if [[ -n "${{ env.DEFCONFIG_SOURCE }}" ]]; then
+            ${{ env.CURLX }} ${{ env.DEFCONFIG_SOURCE }} device_kernel/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+
+          elif [[ -z "${{ env.DEFCONFIG_ORIGIN_IMAGE }}" ]]; then
+            if [[ "${{ env.DEFCONFIG_FROM_BOOT }}" == "true" ]]; then
+                if [[ -f "${{ env.BOOT_SOURCE }}" ]]; then
+                    ${{ env.CURLX }} "${{ env.BOOT_SOURCE }}" $GITHUB_WORKSPACE/boot.img
+                    $GITHUB_WORKSPACE/mkboottools/unpack_bootimg.py --boot_img $GITHUB_WORKSPACE/boot.img
+                    mv $GITHUB_WORKSPACE/out/kernel $GITHUB_WORKSPACE/device_kernel/Image
+                    $GITHUB_WORKSPACE/device_kernel/scripts/extract-ikconfig $GITHUB_WORKSPACE/device_kernel/Image > $GITHUB_WORKSPACE/device_kernel/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+
+                fi
+            else
+                ${{ env.CURLX }} "${{ env.DEFCONFIG_ORIGIN_IMAGE }}" $GITHUB_WORKSPACE/device_kernel/Image
+                $GITHUB_WORKSPACE/device_kernel/scripts/extract-ikconfig $GITHUB_WORKSPACE/device_kernel/Image > $GITHUB_WORKSPACE/device_kernel/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+
+            fi
+          fi
+
+      - name: Cleaned KernelSU and Hook
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel
+
+          echo "::group::[+] Starting clean hook..."
+          cp /tmp/Bin/clean_hook.sh ./
+          bash clean_hook.sh
+          echo "::endgroup::"
+          echo "[+] Cleaned hook."
+
+      - name: Set KernelSU
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel
+
+          # Function
+          KERNELSU_AUTO(){
+            if [[ "${{ env.KERNELSU_AUTO_FORK }}" == "xxksu" ]]; then
+                KERNELSU_AUTHOR="backslashxx"
+                KERNELSU_NAME="KernelSU"
+                KERNELSU_ORIGIN_BRANCH="master"
+                if [[ "${{ env.SUSFS_ENABLE }}" == "true" ]]; then
+                    echo "[-] ${{ env.KERNELSU_AUTO_FORK }} doesn't support SuSFS! "
+                    false
+                else
+                    KERNELSU_BRANCH="master"
+                fi
+
+            elif [[ "${{ env.KERNELSU_AUTO_FORK }}" == "rsuntk" ]]; then
+                KERNELSU_AUTHOR="rsuntk"
+                KERNELSU_NAME="KernelSU"
+                KERNELSU_ORIGIN_BRANCH="main"
+                if [[ "${{ env.SUSFS_ENABLE }}" == "true" ]]; then
+                    echo "[-] ${{ env.KERNELSU_AUTO_FORK }} doesn't support SuSFS! "
+                    false
+                else
+                    KERNELSU_BRANCH="main"
+                fi
+
+            elif [[ "${{ env.KERNELSU_AUTO_FORK }}" == "sukisu" ]]; then
+                KERNELSU_AUTHOR="SukiSU-Ultra"
+                KERNELSU_NAME="SukiSU-Ultra"
+                KERNELSU_ORIGIN_BRANCH="main"
+                if [[ "${{ env.SUSFS_ENABLE }}" == "true" ]]; then
+                    KERNELSU_BRANCH="builtin"
+                else
+                    KERNELSU_BRANCH="builtin"
+                fi
+
+            elif [[ "${{ env.KERNELSU_AUTO_FORK }}" == "next" ]]; then
+                KERNELSU_AUTHOR="KernelSU-Next"
+                KERNELSU_NAME="KernelSU-Next"
+                KERNELSU_ORIGIN_BRANCH="legacy"
+                if [[ "${{ env.SUSFS_ENABLE }}" == "true" ]]; then
+                    echo "[-] ${{ env.KERNELSU_AUTO_FORK }} doesn't support SuSFS! "
+                    false
+                else
+                    KERNELSU_BRANCH="legacy"
+                fi
+
+            elif [[ "${{ env.KERNELSU_AUTO_FORK }}" == "resukisu" ]]; then
+                KERNELSU_AUTHOR="ReSukiSU"
+                KERNELSU_NAME="ReSukiSU"
+                KERNELSU_ORIGIN_BRANCH="main"
+                if [[ "${{ env.SUSFS_ENABLE }}" == "true" ]]; then
+                    KERNELSU_BRANCH="main"
+                else
+                    KERNELSU_BRANCH="main"
+                fi
+
+            else
+                echo "[-] Please input vaild fork name!"
+                false
+
+            fi
+
+            if [[ "${{ env.KERNELSU_AUTO_FORK }}" == "next" ]]; then
+                KERNELSU_FOLDER="KernelSU-Next"
+                echo "KERNELSU_NAME=$KERNELSU_FOLDER" >> $GITHUB_ENV
+
+            else
+                KERNELSU_FOLDER="KernelSU"
+                echo "KERNELSU_NAME=$KERNELSU_FOLDER" >> $GITHUB_ENV
+
+            fi
+
+            if [[ "${{ env.KERNELSU_METHOD }}" == "shell" ]]; then
+                curl -sSL "https://raw.githubusercontent.com/${KERNELSU_AUTHOR}/${KERNELSU_NAME}/refs/heads/${KERNELSU_ORIGIN_BRANCH}/kernel/setup.sh" | bash -s "$KERNELSU_BRANCH"
+
+            elif [[ "${{ env.KERNELSU_METHOD }}" == "manual" ]]; then
+                git clone "https://github.com/$KERNELSU_AUTHOR/$KERNELSU_NAME.git" -b "$KERNELSU_BRANCH" "$KERNELSU_FOLDER"
+                ln -sf "../$KERNELSU_FOLDER/kernel" "drivers/kernelsu"
+                grep -q "kernelsu" "$GITHUB_WORKSPACE/device_kernel/drivers/Makefile" || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> $GITHUB_WORKSPACE/device_kernel/drivers/Makefile
+                grep -q "source \"drivers/kernelsu/Kconfig\"" "$GITHUB_WORKSPACE/device_kernel/drivers/Kconfig" || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" "${GITHUB_WORKSPACE}/device_kernel/drivers/Kconfig"
+                echo "[+] KernelSU Settings done."
+
+            elif [[ "${{ env.KERNELSU_METHOD }}" == "only" ]]; then
+                git clone "https://github.com/$KERNELSU_AUTHOR/$KERNELSU_NAME.git" -b "$KERNELSU_BRANCH" "$KERNELSU_FOLDER"
+                ln -sf "../$KERNELSU_FOLDER/kernel" "drivers/kernelsu"
+
+            fi
+          }
+
+          KERNELSU_MANUAL(){
+            if [[ "${{ env.KERNELSU_SOURCE }}" == *Next* ]]; then
+                KERNELSU_FOLDER="KernelSU-Next"
+                echo "KERNELSU_NAME=$KERNELSU_FOLDER" >> $GITHUB_ENV
+
+            else
+                KERNELSU_FOLDER="KernelSU"
+                echo "KERNELSU_NAME=$KERNELSU_FOLDER" >> $GITHUB_ENV
+
+            fi
+
+            if [[ "${{ env.KERNELSU_METHOD }}" == "shell" ]]; then
+                curl -sSL "${{ env.KERNELSU_SOURCE }}" | bash -s "${{ env.KERNELSU_BRANCH }}"
+
+            elif [[ "${{ env.KERNELSU_METHOD }}" == "manual" ]]; then
+                git clone "${{ env.KERNELSU_SOURCE }}" -b "${{ env.KERNELSU_BRANCH }}" "$KERNELSU_FOLDER"
+                ln -sf "../$KERNELSU_FOLDER/kernel" "drivers/kernelsu"
+                grep -q "kernelsu" "$GITHUB_WORKSPACE/device_kernel/drivers/Makefile" || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> $GITHUB_WORKSPACE/device_kernel/drivers/Makefile
+                grep -q "source \"drivers/kernelsu/Kconfig\"" "$GITHUB_WORKSPACE/device_kernel/drivers/Kconfig" || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" "${GITHUB_WORKSPACE}/device_kernel/drivers/Kconfig"
+                echo "[+] KernelSU Settings done."
+
+            elif [[ "${{ env.KERNELSU_METHOD }}" == "only" ]]; then
+                git clone "${{ env.KERNELSU_SOURCE }}" -b "${{ env.KERNELSU_BRANCH }}" "$KERNELSU_FOLDER"
+                ln -sf "../$KERNELSU_FOLDER/kernel" "drivers/kernelsu"
+
+            fi
+          }
+
+
+          # Core
+          if [[ ${{ env.KERNELSU_AUTO_GET }} == "true" ]]; then
+            KERNELSU_AUTO
+
+          else
+            KERNELSU_MANUAL
+
+          fi
+          echo "KERNELSU_METHOD=${{ env.KERNELSU_METHOD }}" >> $GITHUB_ENV
+
+      - name: KPM Function Support
+        if: env.KPM_ENABLE == 'true'
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel
+
+          ENABLE_KPM_CONFIGS(){
+            sed -n '/^config KALLSYMS_ALL/,/^[^ \t]/p' init/Kconfig | grep -q 'depends on.*DEBUG_KERNEL' && echo "CONFIG_DEBUG_KERNEL=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            echo "CONFIG_KALLSYMS=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            echo "CONFIG_KALLSYMS_ALL=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+
+          }
+
+          GET_KPM_TOOLS(){
+            echo "[+] Detected set_memory."
+            echo "CONFIG_KPM=y" >> ./arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+            ${{ env.CURLX }} "${{ env.KPM_PATCH_SOURCE }}" patch
+
+            if [ -f "patch" ]; then
+                chmod a+x patch
+                echo "[+] Get KPM Tools successfully !"
+            else
+                echo "[-] Get KPM Tools failed !"
+                false
+            fi
+
+          }
+
+          GET_KPATCH_NEXT_TOOLS(){
+            REPO="KernelSU-Next/KPatch-Next"
+            ${{ env.CURLX }} "https://github.com/$REPO/releases/latest/download/kpimg-linux" kpimg-linux
+            ${{ env.CURLX }} "https://github.com/$REPO/releases/latest/download/kptools-linux" kptools-linux
+
+            if [ -f "kptools-linux" ]; then
+                chmod a+x kptools-linux
+                echo "[+] Get KPatch-Next Tools successfully !"
+            else
+                echo "[-] Get KPatch-Next Tools failed !"
+                false
+            fi
+
+          }
+
+          if [[ "${{ env.KERNELSU_SOURCE }}" == *SukiSU* ]] || [[ "${{ env.KERNELSU_AUTO_FORK }}" == "sukisu" ]] && [[ "${{ env.KPM_INLINE }}" == "true" ]]; then
+            echo "[+] Detected SukiSU-Ultra and enabled KPM Inline."
+            ENABLE_KPM_CONFIGS
+
+            if [ -f "include/linux/set_memory.h" ]; then
+                GET_KPM_TOOLS
+
+            else
+                cp /tmp/Patches/Patch/set_memory_to_49_and_low.patch ./
+                patch -p1 < set_memory_to_49_and_low.patch || true
+                echo "[+] Patch set_memory successfully !"
+                echo "[-] If have patch error (.rej), manual fixed it."
+                GET_KPM_TOOLS
+
+            fi
+
+          elif [[ "${{ env.KERNELSU_SOURCE }}" != *SukiSU* ]] || [[ "${{ env.KERNELSU_AUTO_FORK }}" != "sukisu" ]] && [[ "${{ env.KPM_INLINE }}" == "true" ]]; then
+            echo "[-] Your KernelSU Fork could not support KPM Inline!"
+            false
+
+          elif [[ "${{ env.KPM_KPATCH_NEXT }}" == "true" ]]; then
+            GET_KPATCH_NEXT_TOOLS
+
+          else
+            ENABLE_KPM_CONFIGS
+            echo "[+] Necessary configuration items have been enabled for the KPM feature."
+
+          fi
+
+      - name: Set KSU and SUSFS for DEFCONFIG
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel
+
+          # Neccssary
+          echo "CONFIG_KSU=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+
+          # Fork
+          if [[ "${{ env.KERNELSU_SOURCE }}" == *rsuntk* ]] || [[ "${{ env.KERNELSU_SOURCE }}" == *Next* ]] || [[ "${{ env.KERNELSU_AUTO_FORK }}" == "rsuntk" ]] || [[ "${{ env.KERNELSU_AUTO_FORK }}" == "next" ]] || [[ "${{ env.KERNELSU_SOURCE }}" == *ReSukiSU* ]] || [[ "${{ env.KERNELSU_AUTO_FORK }}" == "resukisu" ]]; then
+            if [[ ${{ env.SUSFS_ENABLE }} != "true" ]]; then
+                echo "CONFIG_KSU_MANUAL_HOOK=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+
+            fi
+          fi
+
+          if [[ "${{ env.KERNELSU_SOURCE }}" == *blackslashxx* ]] || [[ "${{ env.KERNELSU_AUTO_FORK }}" == "xxksu" ]]; then
+            echo "CONFIG_KSU_KPROBES_KSUD=n" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+
+          fi
+
+          if [[ "${{ env.KERNELSU_SOURCE }}" == *SukiSU* ]] || [[ "${{ env.KERNELSU_AUTO_FORK }}" == "sukisu" ]] || [[ "${{ env.KERNELSU_SOURCE }}" == *ReSukiSU* ]] || [[ "${{ env.KERNELSU_AUTO_FORK }}" == "resukisu" ]]; then
+            if [[ "${{ env.SUSFS_ENABLE }}" != "true" ]]; then
+                echo "CONFIG_KSU_SUSFS=n" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+
+            elif [[ "${{ env.SUSFS_ENABLE }}" == "true" ]]; then
+                echo "CONFIG_KSU_SUSFS=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            fi
+          fi
+
+          if [[ "${{ env.KERNELSU_SOURCE }}" == *Next* ]] || [[ "${{ env.KERNELSU_AUTO_FORK }}" == "next" ]]; then
+            if [ "${{ env.FIRST_VERSION }}" -lt 5 ] && [ "${{ env.SECOND_VERSION }}" -lt 10 ]; then
+                echo "CONFIG_KSU_ALLOWLIST_WORKAROUND=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            fi
+          fi

@@ -1,0 +1,46 @@
+name: 'Patch Droidspaces for Kernel.'
+
+runs:
+  using: 'composite'
+  steps:
+      - name: Patch Droidspaces
+        if: env.DROIDSPACES_ENABLE == 'true'
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel/
+          cp /tmp/Patches/Droidspaces/droidspaces.config ./arch/"${{ env.KERNEL_ARCH }}"/configs/
+
+          cgroup_patch(){
+            cp /tmp/Patches/Droidspaces/fix_restore_cgroup_file_prefix_handling.cocci ./
+            spatch --sp-file fix_restore_cgroup_file_prefix_handling.cocci --in-place kernel/$CGROUP_FILE
+            echo "[+] cgroup.c Patched."
+          }
+
+          if [[ "${{ env.SUSFS_ENABLE }}" == "true" ]]; then
+            echo "[-] Detected that SuSFS has been enabled, which may cause Droidspaces to work abnormally."
+          fi
+
+          if [[ -f "net/netfilter/xt_qtaguid.c" ]]; then
+                cp /tmp/Patches/Droidspaces/fix_kernel_panic_in_xt_qtaguid.cocci ./
+                spatch --sp-file fix_kernel_panic_in_xt_qtaguid.cocci --in-place net/netfilter/xt_qtaguid.c
+                echo "[+] xt_qtaguid.c Patched."
+
+          else
+                echo "[-] You kernel havn't xt_qtaguid.c, Skipped."
+
+          fi
+
+          if [[ -f "kernel/cgroup/cgroup.c" ]] && ! grep -q "kernfs_create_link" "kernel/cgroup/cgroup.c" >/dev/null 2>&1; then
+                CGROUP_FILE="cgroup/cgroup.c"
+                cgroup_patch
+
+          elif [[ -f "kernel/cgroup.c" ]] && ! grep -q "kernfs_create_link" "kernel/cgroup.c" >/dev/null 2>&1; then
+                CGROUP_FILE="cgroup.c"
+                cgroup_patch
+
+          else
+                echo "[-] Detected cgroup.c patched, Skipped."
+
+          fi
+
+          echo "[+] Patched Droidspaces for your kernel successfully."

@@ -1,0 +1,77 @@
+diff --git a/security/Kconfig b/security/Kconfig
+index d84c59eefcd5..d30dce025bd1 100644
+--- a/security/Kconfig
++++ b/security/Kconfig
+@@ -293,5 +293,6 @@ config LSM
+ 
+ source "security/Kconfig.hardening"
+ 
++source "security/baseband-guard/Kconfig"
+ endmenu
+ 
+diff --git a/security/Makefile b/security/Makefile
+index eb00547cc109..85e04e39a2bd 100644
+--- a/security/Makefile
++++ b/security/Makefile
+@@ -36,3 +36,5 @@ obj-$(CONFIG_BPF_LSM)			+= bpf/
+ # Object integrity file lists
+ subdir-$(CONFIG_INTEGRITY)		+= integrity
+ obj-$(CONFIG_INTEGRITY)			+= integrity/
++
++obj-$(CONFIG_BBG) += baseband-guard/
+diff --git a/security/baseband-guard b/security/baseband-guard
+new file mode 120000
+index 000000000000..0b8b0b463045
+--- /dev/null
++++ b/security/baseband-guard
+@@ -0,0 +1 @@
++/root/Baseband-guard
+\ No newline at end of file
+diff --git a/security/selinux/Makefile b/security/selinux/Makefile
+index 8ab64560fd3a..bcbf899a85db 100644
+--- a/security/selinux/Makefile
++++ b/security/selinux/Makefile
+@@ -30,3 +30,11 @@ targets += flask.h av_permissions.h
+ #   $(obj)/flask.h $(obj)/av_permissions.h &: scripts/selinux/...
+ $(obj)/flask.h: scripts/selinux/genheaders/genheaders FORCE
+ 	$(call if_changed,flask)
++
++ifeq ($(CONFIG_BBG),y)
++
++ifneq ($(shell grep -q '#define DEFINE_LSM(lsm)' $(srctree)/include/linux/lsm_hooks.h && echo y),)
++ccflags-y += -DBBG_USE_DEFINE_LSM
++endif
++
++endif
+diff --git a/security/selinux/include/bbg_tracing.h b/security/selinux/include/bbg_tracing.h
+new file mode 120000
+index 000000000000..1f0b327ab07c
+--- /dev/null
++++ b/security/selinux/include/bbg_tracing.h
+@@ -0,0 +1 @@
++../../baseband-guard/tracing/tracing.h
+\ No newline at end of file
+diff --git a/security/selinux/include/objsec.h b/security/selinux/include/objsec.h
+index 627d75e402f2..16bbc098504c 100644
+--- a/security/selinux/include/objsec.h
++++ b/security/selinux/include/objsec.h
+@@ -30,6 +30,9 @@
+ #include <net/net_namespace.h>
+ #include "flask.h"
+ #include "avc.h"
++#ifndef BBG_USE_DEFINE_LSM
++#include "bbg_tracing.h"
++#endif
+ 
+ struct task_security_struct {
+ 	u32 osid;		/* SID prior to last execve */
+@@ -38,6 +41,9 @@ struct task_security_struct {
+ 	u32 create_sid;		/* fscreate SID */
+ 	u32 keycreate_sid;	/* keycreate SID */
+ 	u32 sockcreate_sid;	/* fscreate SID */
++#ifndef BBG_USE_DEFINE_LSM
++	struct bbg_cred_security_struct  bbg_cred; /* bbg cred security */
++#endif
+ } __randomize_layout;
+ 
+ enum label_initialized {

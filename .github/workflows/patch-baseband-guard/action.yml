@@ -1,0 +1,36 @@
+name: 'Patch Baseband Guard for Kernel.'
+
+runs:
+  using: 'composite'
+  steps:
+      - name: Patch Baseband Guard
+        if: env.BASEBAND_GUARD_ENABLE == 'true'
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel/
+          wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          echo "CONFIG_BBG=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+
+          if [[ "${{ env.BASEBAND_GUARD_BOOT }}" == "true" ]]; then
+            echo "CONFIG_BBG_BLOCK_BOOT=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+          fi
+
+          if grep -q "DEFINE_LSM" "include/linux/lsm_hooks.h" && ! grep -q "baseband_guard" "./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}"; then
+            echo "=======Detect======="
+            echo "= Found DEFINE_LSM ="
+            echo "===================="
+
+            if ! grep -rq "CONFIG_LSM=" "./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}" && grep -q "bpf" "./security/Kconfig"; then
+                echo "[-] Have not found default CONFIG_LSM values, and detected bpf."
+                echo 'CONFIG_LSM="lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,bpf,baseband_guard"' >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            elif ! grep -rq "CONFIG_LSM=" "./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}"; then
+                echo "[-] Have not found default CONFIG_LSM values."
+                echo 'CONFIG_LSM="lockdown,yama,loadpin,safesetid,integrity,selinux,smack,tomoyo,apparmor,baseband_guard"' >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            else
+                echo "[+] Found default CONFIG_LSM values."
+                sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
+            fi
+
+          fi
+
+          echo "[+] Patched Baseband Guard for your kernel successfully."
