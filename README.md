@@ -21,9 +21,12 @@ The OnePlus OSS kernel (`OnePlusOSS/android_kernel_oneplus_sm8250`, branch `onep
 |---|---|
 | ReSukiSU | KernelSU fork, CONFIG_KSU_SUSFS (inline hook) mode |
 | SUSFS v2.2.0 | Re-generated for OOS 4.19.157 old structure (uses `vfs_kern_mount`, no `ND_STATE`) |
-| Re:Kernel | v8.5, **dedup feature disabled** (OOS binder lacks `proc->outstanding_txns`); reporting only |
 | DroidSpaces | cgroup prefix hiding + Non-GKI configs (incl. USER_NS) |
 | Baseband Guard | non-GKI / pre-5.1 LSM style (`security_add_hooks_compat`, no `DEFINE_LSM`) |
+
+> Re:Kernel is **not** integrated: OOS 13.1 already ships its own binder/freeze monitor
+> **HANS** (`CONFIG_OPLUS_HANS=y`, `drivers/staging/android/hans.c`), which covers the same
+> freeze-management role, so Re:Kernel would be redundant (and its enum clashed with `hans.h`).
 
 ## Usage
 
@@ -37,8 +40,7 @@ The OnePlus OSS kernel (`OnePlusOSS/android_kernel_oneplus_sm8250`, branch `onep
 | File | Content | Applied by |
 |---|---|---|
 | `Patch/susfs_resukisu_oos_4.19.patch` | SUSFS v2.2.0 (4.19.157) + ReSukiSU inline hooks (7 hooks) | workflow step |
-| `Patch/defconfig_oos.patch` | KSU/SUSFS/ReKernel/BBG/DroidSpaces Non-GKI configs | workflow step |
-| `Rekernel/rekernel_oos_4.19.patch` | Re:Kernel (binder report + signal) **dedup removed** | workflow step |
+| `Patch/defconfig_oos.patch` | KSU/SUSFS/BBG/DroidSpaces Non-GKI configs | workflow step |
 | `Droidspaces/oos_droidspaces.patch` | cgroup prefix + xt_qtaguid panic fix | workflow step |
 | Baseband Guard | fetched at build time via `setup.sh` (non-GKI path) | workflow step |
 
@@ -55,10 +57,6 @@ The OOS patch is based on **JackA1ltman's generic 4.19 patch** which targets the
 - `drivers/input/input.c`: OOS has `OPLUS_FEATURE_SAUPWK` block → input hook placed accordingly
 - `fs/read_write.c`: OOS has `OPLUS_FEATURE_IOMONITOR` block → sys_read hook adapted
 - `fs/stat.c`: `ksu_handle_stat` added manually (SUSFS patch doesn't include it for OOS)
-
-ReKernel dedup needs `proc->outstanding_txns` (binder ≥5.4). OOS 4.19.157 lacks it, so
-`binder_can_update_transaction`/`binder_find_outdated_transaction_ilocked` and the free block were removed;
-only `rekernel_binder_transaction` reporting remains.
 
 ## Key settings (build-oneplus-8-los23-a16.yml)
 

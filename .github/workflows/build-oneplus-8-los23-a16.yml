@@ -72,7 +72,6 @@ env:
   SUSFS_FOLDER_FIXED: ""
   SUSFS_PATCH_FIXED: ""
 
-  REKERNEL_ENABLE: "true"
   # DroidSpaces 配置已通过 defconfig_oos.patch 注入, 无需 build-process 再 merge droidspaces.config
   DROIDSPACES_ENABLE: "false"
   NOMOUNT_ENABLE: "false"
@@ -160,16 +159,6 @@ jobs:
           patch -p1 < susfs_resukisu_oos_4.19.patch || true
           rm -f susfs_resukisu_oos_4.19.patch
           echo "[+] OOS SUSFS + ReSukiSU patched."
-
-      - name: 🧰 Patch Kernel of ReKernel (OOS)
-        run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel/
-          cp /tmp/Patches/Rekernel/rekernel_oos_4.19.patch ./
-          patch -p1 < rekernel_oos_4.19.patch || true
-          rm -f rekernel_oos_4.19.patch
-          grep -q "rekernel" drivers/Makefile || printf "\nobj-\$(CONFIG_REKERNEL) += rekernel/\n" >> drivers/Makefile
-          grep -q "source \"drivers/rekernel/Kconfig\"" drivers/Kconfig || sed -i "/endmenu/i\source \"drivers/rekernel/Kconfig\"" drivers/Kconfig
-          echo "[+] Patched Re:Kernel for OOS successfully."
 
       - name: 💿 Patch Kernel of Droidspaces (OOS)
         run: |

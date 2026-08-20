@@ -21,9 +21,12 @@ LineageOS 23.2 (A16) 换成 **一加官方 OnePlus OSS 内核**。
 |---|---|
 | ReSukiSU | KernelSU 分支, CONFIG_KSU_SUSFS (inline hook) 模式 |
 | SUSFS v2.2.0 | 针对 OOS 4.19.157 老结构重新生成（用 `vfs_kern_mount`，无 `ND_STATE`） |
-| Re:Kernel | v8.5, **去重功能已禁用**（OOS binder 无 `proc->outstanding_txns`），仅保留上报 |
 | DroidSpaces | cgroup 前缀隐藏 + Non-GKI 配置 (含 USER_NS) |
 | Baseband Guard | 非 GKI / pre-5.1 LSM 风格 (`security_add_hooks_compat`, 无 `DEFINE_LSM`) |
+
+> **不集成 Re:Kernel**：OOS 13.1 自带 binder/冻结监控 **HANS**（`CONFIG_OPLUS_HANS=y`,
+> `drivers/staging/android/hans.c`），已覆盖 Re:Kernel 的冻结管理功能，再集成反而冗余
+> （且 Re:Kernel 的 `SIGNAL` 枚举与 `hans.h` 冲突）。
 
 ## 使用方法
 
@@ -38,8 +41,7 @@ LineageOS 23.2 (A16) 换成 **一加官方 OnePlus OSS 内核**。
 | 文件 | 内容 | 应用时机 |
 |---|---|---|
 | `Patch/susfs_resukisu_oos_4.19.patch` | SUSFS v2.2.0 (4.19.157) + ReSukiSU inline 7 钩子 | 工作流步骤 |
-| `Patch/defconfig_oos.patch` | KSU/SUSFS/ReKernel/BBG/DroidSpaces Non-GKI 配置 | 工作流步骤 |
-| `Rekernel/rekernel_oos_4.19.patch` | Re:Kernel（binder 上报 + signal），**去重已移除** | 工作流步骤 |
+| `Patch/defconfig_oos.patch` | KSU/SUSFS/BBG/DroidSpaces Non-GKI 配置 | 工作流步骤 |
 | `Droidspaces/oos_droidspaces.patch` | cgroup 前缀 + xt_qtaguid panic 修复 | 工作流步骤 |
 | Baseband Guard | 构建时 `setup.sh` 动态拉取（非 GKI 路径） | 工作流步骤 |
 
@@ -56,10 +58,6 @@ OOS 补丁基于 **JackA1ltman 的通用 4.19 补丁**（它针对 OOS 同款的
 - `drivers/input/input.c`: OOS 有 `OPLUS_FEATURE_SAUPWK` 块 → input hook 相应放置
 - `fs/read_write.c`: OOS 有 `OPLUS_FEATURE_IOMONITOR` 块 → sys_read hook 适配
 - `fs/stat.c`: `ksu_handle_stat` 手工补（OOS 的 SUSFS 补丁不含它）
-
-ReKernel 去重需要 `proc->outstanding_txns`（binder ≥5.4）。OOS 4.19.157 没有该字段，
-因此移除了 `binder_can_update_transaction`/`binder_find_outdated_transaction_ilocked` 及释放块，
-仅保留 `rekernel_binder_transaction` 上报功能。
 
 ## 关键配置项 (build-oneplus-8-los23-a16.yml)
 

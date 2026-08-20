@@ -1,8 +1,8 @@
 diff --git a/arch/arm64/configs/vendor/kona-perf_defconfig b/arch/arm64/configs/vendor/kona-perf_defconfig
-index 5b64d899..988c8371 100755
+index 5b64d899..833f0aff 100755
 --- a/arch/arm64/configs/vendor/kona-perf_defconfig
 +++ b/arch/arm64/configs/vendor/kona-perf_defconfig
-@@ -1,3 +1,32 @@
+@@ -1,3 +1,29 @@
 +# ReSukiSU + SUSFS (OOS 4.19.157)
 +CONFIG_KSU=y
 +CONFIG_KSU_SUSFS=y
@@ -15,9 +15,6 @@ index 5b64d899..988c8371 100755
 +CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y
 +CONFIG_KSU_SUSFS_OPEN_REDIRECT=y
 +CONFIG_KSU_SUSFS_SUS_MAP=y
-+# Re:Kernel
-+CONFIG_REKERNEL=y
-+CONFIG_REKERNEL_NETWORK=n
 +# Baseband-guard
 +CONFIG_BBG=y
 +# DroidSpaces
