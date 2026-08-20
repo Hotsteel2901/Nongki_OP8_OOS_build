@@ -123,7 +123,7 @@ jobs:
           # OnePlus OOS 内核的 vendor symlink 指向 ../../../../../../vendor
           # (从 arch/arm64/boot/dts 上溯 6 层), 需把 devicetree+oplus 源码放到对应位置
           # 布局: <ROOT>/kernel_src/arch/arm64/boot/dts -> 6层 -> <ROOT>/vendor
-          # 本 workflow 中 device_kernel 位于 $GITHUB_WORKSPACE/device_kernel
+          # 本 workflow 中 device_kernel 位于 $GITHUB_WORKSPACE/kernel/device_kernel
           # 其 6 层上级为 $GITHUB_WORKSPACE, 故 vendor 放在 $GITHUB_WORKSPACE/vendor
           cd $GITHUB_WORKSPACE
           if [ ! -d vendor ]; then
@@ -131,7 +131,7 @@ jobs:
             false
           fi
           # 验证关键 symlink 可解析 (devicetree + oplus kernel)
-          cd device_kernel
+          cd kernel/device_kernel
           for check in arch/arm64/boot/dts/vendor drivers/soc/oplus/system drivers/power/oplus fs/erofs; do
             if [ -e "$check" ]; then
               echo "[+] $check -> $(readlink -f $check)"
@@ -144,7 +144,7 @@ jobs:
 
       - name: 📌 Kernel version suffix (OOS)
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/device_kernel
           # ReSukiSU setup.sh 已注册 drivers/kernelsu (Makefile+Kconfig)
           # 这里仅设置自定义版本后缀
           echo "-g$(git rev-parse --short HEAD)-oos-hotsteel" > .scmversion
@@ -152,7 +152,7 @@ jobs:
 
       - name: 🪝 Patch Kernel of SUSFS + ReSukiSU (OOS)
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel/
+          cd $GITHUB_WORKSPACE/kernel/device_kernel/
           cp /tmp/Patches/Patch/susfs_resukisu_oos_4.19.patch ./
           patch -p1 < susfs_resukisu_oos_4.19.patch || true
           rm -f susfs_resukisu_oos_4.19.patch
@@ -160,7 +160,7 @@ jobs:
 
       - name: 🧰 Patch Kernel of ReKernel (OOS)
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel/
+          cd $GITHUB_WORKSPACE/kernel/device_kernel/
           cp /tmp/Patches/Rekernel/rekernel_oos_4.19.patch ./
           patch -p1 < rekernel_oos_4.19.patch || true
           rm -f rekernel_oos_4.19.patch
@@ -170,7 +170,7 @@ jobs:
 
       - name: 💿 Patch Kernel of Droidspaces (OOS)
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel/
+          cd $GITHUB_WORKSPACE/kernel/device_kernel/
           cp /tmp/Patches/Droidspaces/oos_droidspaces.patch ./
           patch -p1 < oos_droidspaces.patch || true
           rm -f oos_droidspaces.patch
@@ -178,13 +178,13 @@ jobs:
 
       - name: 🔒 Patch Kernel of Baseband Guard (OOS, non-GKI)
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel/
+          cd $GITHUB_WORKSPACE/kernel/device_kernel/
           wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
           echo "[+] Patched Baseband Guard for OOS successfully."
 
       - name: 📝 Apply OOS defconfig fragment
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel/
+          cd $GITHUB_WORKSPACE/kernel/device_kernel/
           cp /tmp/Patches/Patch/defconfig_oos.patch ./
           patch -p1 < defconfig_oos.patch || true
           rm -f defconfig_oos.patch
@@ -195,7 +195,7 @@ jobs:
 
       - name: 🖼️ Generate DTB (OOS concat kona dtb variants)
         run: |
-          cd $GITHUB_WORKSPACE/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/device_kernel
           DTB_DIR="out/arch/arm64/boot/dts/vendor/19821"
           if [ -f "$DTB_DIR/kona-mtp.dtb" ]; then
             cat "$DTB_DIR/kona-mtp.dtb" > out/arch/arm64/boot/dtb.img
