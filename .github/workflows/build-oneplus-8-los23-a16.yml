@@ -158,7 +158,7 @@ jobs:
           rm -f susfs_resukisu_oos_4.19.patch
           echo "[+] OOS SUSFS + ReSukiSU patched."
 
-      - name: 🧰 Patch Kernel of Re:Kernel (OOS)
+      - name: 🧰 Patch Kernel of ReKernel (OOS)
         run: |
           cd $GITHUB_WORKSPACE/device_kernel/
           cp /tmp/Patches/Rekernel/rekernel_oos_4.19.patch ./
@@ -193,7 +193,7 @@ jobs:
       - name: 🚀 Build Process
         uses: ./.github/workflows/build-process
 
-      - name: 🖼️ Generate DTB (OOS: concat kona dtb variants)
+      - name: 🖼️ Generate DTB (OOS concat kona dtb variants)
         run: |
           cd $GITHUB_WORKSPACE/device_kernel
           DTB_DIR="out/arch/arm64/boot/dts/vendor/19821"
