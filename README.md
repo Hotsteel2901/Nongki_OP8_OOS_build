@@ -46,6 +46,15 @@ The OnePlus OSS kernel (`OnePlusOSS/android_kernel_oneplus_sm8250`, branch `onep
 
 > All OOS patches are generated against kernel commit `1d2678a3548f` (OOS13.1 final, 4.19.157-perf).
 
+## Patch Record Archive (Patches/Archive/)
+
+Complete dev record and re-generation guide (in English): `Patches/Archive/README.md`
+- `0000-full-all-changes.patch` — full combined patch set (SUSFS+ReSukiSU + DroidSpaces + defconfig)
+- `0001-susfs-resukisu-oos-4.19.patch` / `0001-defconfig-oos.patch` / `0001-droidspaces-oos.patch`
+- Documents the non-obvious OOS facts (devicetree symlink depth, techpack from
+  modules_and_devicetree, no Re:Kernel/HANS, clang-19 KCFLAGS quoting) and every
+  build error + fix so the next person can pick up where we left off.
+
 ## SUSFS re-generation notes (OOS 4.19.157)
 
 The OP8/LOS patch (4.19.325) does **not** apply cleanly to OOS (different namei/namespace layout).

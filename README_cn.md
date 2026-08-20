@@ -47,6 +47,15 @@ LineageOS 23.2 (A16) 换成 **一加官方 OnePlus OSS 内核**。
 
 > 所有 OOS 补丁基于内核提交 `1d2678a3548f`（OOS13.1 最终版, 4.19.157-perf）生成。
 
+## 补丁记录存档 (Patches/Archive/)
+
+完整开发记录与重生成指南（英文）：`Patches/Archive/README.md`
+- `0000-full-all-changes.patch` — 全量合集（SUSFS+ReSukiSU + DroidSpaces + defconfig）
+- `0001-susfs-resukisu-oos-4.19.patch` / `0001-defconfig-oos.patch` / `0001-droidspaces-oos.patch`
+- 记录了 OOS 特有的非显而易见事实（设备树 symlink 深度、techpack 来自 modules_and_devicetree、
+  无 Re:Kernel/HANS、clang-19 KCFLAGS 引号）以及每个构建错误与修复，
+  便于后续者从当前进度续接。
+
 ## SUSFS 重新生成说明 (OOS 4.19.157)
 
 OP8/LOS 项目的补丁（4.19.325）**无法干净应用到 OOS**（namei/namespace 布局不同）。
