@@ -9,7 +9,7 @@ env:
   DEVICE_NAME : "oneplus_8"
   DEVICE_CODENAME : "instantnoodle"
 
-  CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-gnu-"
+  CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-android-"
   EXTRA_CMDS : ""
 
   # OOS 官方内核 (OnePlus OSS, 4.19.157) - 设备树在独立仓库
