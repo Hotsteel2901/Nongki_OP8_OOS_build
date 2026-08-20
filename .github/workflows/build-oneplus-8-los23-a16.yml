@@ -10,9 +10,9 @@ env:
   DEVICE_CODENAME : "instantnoodle"
 
   CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-android-"
-  # OOS 4.19.157 旧代码 + clang 19: 禁用新 clang 默认的 -Werror 严格警告
-  # (空参数函数原型 / 函数指针类型不匹配 / 旧式非原型声明)
-  EXTRA_CMDS : "KCFLAGS=-Wno-strict-prototypes -Wno-incompatible-function-pointer-types -Wno-deprecated-non-prototype"
+  # OOS 4.19.157 旧代码 + clang 19: 禁用新 clang 默认 -Werror 严格警告
+  # (空参数函数原型 / 函数指针类型不匹配 / 旧式非原型声明 / 缺返回类型 / 隐式转换)
+  EXTRA_CMDS : "KCFLAGS=-Wno-strict-prototypes -Wno-incompatible-function-pointer-types -Wno-deprecated-non-prototype -Wno-implicit-int -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast -Wno-implicit-function-declaration -Wno-unused-but-set-variable"
 
   # OOS 官方内核 (OnePlus OSS, 4.19.157) - 设备树在独立仓库
   KERNEL_SOURCE : "https://github.com/OnePlusOSS/android_kernel_oneplus_sm8250.git"
