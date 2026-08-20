@@ -29,6 +29,36 @@ runs:
           echo "FIRST_VERSION=$(echo "$KERNEL_VERSION" | awk -F '.' '{print $1}')" >> $GITHUB_ENV
           echo "SECOND_VERSION=$(echo "$KERNEL_VERSION" | awk -F '.' '{print $2}')" >> $GITHUB_ENV
 
+      - name: Get OOS Vendor/Devicetree (modules_and_devicetree)
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE
+          echo "::group::[+] Starting git clone OOS vendor/devicetree..."
+          # OnePlus OOS 内核的 vendor symlink 指向 ../../../../../../vendor
+          # (从 device_kernel/arch/arm64/boot/dts 上溯 6 层 -> $GITHUB_WORKSPACE)
+          # 因此把 devicetree+oplus 源码放到 $GITHUB_WORKSPACE/vendor
+          if [ -n "${{ env.VENDOR_SOURCE }}" ]; then
+            git clone --depth=1 "${{ env.VENDOR_SOURCE }}" -b "${{ env.VENDOR_BRANCH }}" oos_vendor_tmp
+            mv oos_vendor_tmp/vendor ./vendor
+            rm -rf oos_vendor_tmp
+            echo "[+] OOS vendor cloned."
+          else
+            echo "[-] VENDOR_SOURCE not set."
+            false
+          fi
+
+          # 验证关键 symlink 可解析 (OOS 构建前提)
+          cd device_kernel
+          echo "::endgroup::"
+          for check in arch/arm64/boot/dts/vendor drivers/soc/oplus/system drivers/power/oplus fs/erofs drivers/input/touchscreen/oplus_touchscreen; do
+            if [ -e "$check" ]; then
+              echo "[+] $check -> $(readlink -f $check)"
+            else
+              echo "[-] $check cannot resolve, OOS build will fail."
+              false
+            fi
+          done
+
       - name: Get Kernel Arch
         shell: bash
         run: |

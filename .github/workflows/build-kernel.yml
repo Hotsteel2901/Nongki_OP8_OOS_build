@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  # OnePlus 8 (LineageOS 23.2)
-  build-oneplus-8-lineageos23-a16:
-    name: "OnePlus 8 (LineageOS 23.2 Android 16) (ReSukiSU+SUSFS v2.2.0)"
+  # OnePlus 8 (OxygenOS 13.1)
+  build-oneplus-8-oos13-a13:
+    name: "OnePlus 8 (OxygenOS 13.1 Android 13) (ReSukiSU+SUSFS v2.2.0)"
     strategy:
       fail-fast: true
     uses: ./.github/workflows/build-oneplus-8-los23-a16.yml

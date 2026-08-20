@@ -1,77 +1,84 @@
-# NonGKI_Kernel_Build_OP8
+# Nongki_OP8_OOS_build
 
-基于 [JackA1ltman/NonGKI_Kernel_Build_2nd](https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd) 的 sample 分支格式，
-为 **OnePlus 8 (instantnoodle, 4.19.325-cip132-st16)** 的 **LineageOS 23.2 (Android 16)** 内核提供自动化编译。
+为 **OnePlus 8 (instantnoodle, 4.19.157-perf+)** 的 **OxygenOS 13.1 (Android 13)** 内核提供自动化编译。
+是 [NonGKI_Kernel_Build_OP8](https://github.com/Hotsteel2901/NonGKI_Kernel_Build_OP8) 的衍生版，把内核源从
+LineageOS 23.2 (A16) 换成 **一加官方 OnePlus OSS 内核**。
+
+## ⚠️ 与 LineageOS 版本的关键差异
+
+一加 OSS 官方内核（`OnePlusOSS/android_kernel_oneplus_sm8250`，分支 `oneplus/sm8250_t_13.1_op8`，
+`4.19.157`）是**更老的 4.19 结构**，且**内核里没有设备树**：
+
+- `arch/arm64/boot/dts/vendor` 是指向 `../../../../../../vendor/qcom/proprietary/devicetree-4.19` 的 symlink
+- 有 86+ 个 symlink 指向 `vendor/oplus/kernel/*`（充电、触控、oplus_performance、网络等）
+- **这些需要从独立仓库获取：**
+  `OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250`（分支 `oneplus/sm8250_t_13.1_op8`）
+- 工作流会 clone 该仓库并按官方布局放置，使 symlink 可解析
 
 ## 集成内容
 
 | 组件 | 说明 |
 |---|---|
 | ReSukiSU | KernelSU 分支, CONFIG_KSU_SUSFS (inline hook) 模式 |
-| SUSFS v2.2.0 | 官方 gki v2.2.0 + JackA1ltman 实证的 4.19 适配 (i_state 标志位 / p->state=0 / 旧 fsnotify API) |
-| Re:Kernel | v8.5 (ReKernel-X), CONFIG_REKERNEL_NETWORK=n |
+| SUSFS v2.2.0 | 针对 OOS 4.19.157 老结构重新生成（用 `vfs_kern_mount`，无 `ND_STATE`） |
+| Re:Kernel | v8.5, **去重功能已禁用**（OOS binder 无 `proc->outstanding_txns`），仅保留上报 |
 | DroidSpaces | cgroup 前缀隐藏 + Non-GKI 配置 (含 USER_NS) |
-| Baseband Guard | 分区写保护 LSM |
+| Baseband Guard | 非 GKI / pre-5.1 LSM 风格 (`security_add_hooks_compat`, 无 `DEFINE_LSM`) |
 
 ## 使用方法
 
-1. **Fork 本仓库** 到你自己的 GitHub 账号
+1. **Fork 本仓库** 到你的 GitHub 账号
 2. **Settings → Actions → General → Workflow permissions** 选择 `Read and write permissions`
 3. 进入 **Actions** 页, 选择 `Build Kernel` 工作流, 点 **Run workflow** (或直接 push 触发)
-4. 构建完成后在 **Actions → 本次运行 → Artifacts** 下载 zip, 用 AnyKernel3 方式刷入:
-   - 重启到 recovery (fastboot boot recovery 或按键进入)
-   - Apply update → 选择下载的 zip
-   - 或 `adb sideload xxx.zip`
-5. 刷入后通过 KernelSU Manager 验证: 版本显示 **SUSFS 2.2.0**, 授权/模块功能正常.
+4. 构建完成后下载 zip, 用 AnyKernel3 方式刷入
+5. 刷入后通过 KernelSU Manager 验证
 
 ## 补丁说明 (Patches/)
 
 | 文件 | 内容 | 应用时机 |
 |---|---|---|
-| `Patches/Patch/susfs_patch_to_4.19.patch` | SUSFS v2.2.0 全部内核侧代码 (susfs.c/namei/namespace/proc/statfs/mm/kallsyms/avc/cmdline 等) | patch-susfs 动作 |
-| `Patches/Patch/resukisu_inline_hooks.patch` | ReSukiSU inline 模式必需的 7 个钩子 (exec/open/read_write/stat/input/reboot/setresuid) | 工作流自定义步骤 |
-| `Patches/Rekernel/rekernel_extra.patch` | Re:Kernel (drivers/rekernel/ + binder + signal + Kconfig/Makefile 注册) | patch-rekernel 动作 |
-| `Patches/Droidspaces/*` | droidspaces.config (配置) + cgroup 前缀 cocci + xt_qtaguid panic 修复 cocci | patch-droidspaces 动作 |
+| `Patch/susfs_resukisu_oos_4.19.patch` | SUSFS v2.2.0 (4.19.157) + ReSukiSU inline 7 钩子 | 工作流步骤 |
+| `Patch/defconfig_oos.patch` | KSU/SUSFS/ReKernel/BBG/DroidSpaces Non-GKI 配置 | 工作流步骤 |
+| `Rekernel/rekernel_oos_4.19.patch` | Re:Kernel（binder 上报 + signal），**去重已移除** | 工作流步骤 |
+| `Droidspaces/oos_droidspaces.patch` | cgroup 前缀 + xt_qtaguid panic 修复 | 工作流步骤 |
+| Baseband Guard | 构建时 `setup.sh` 动态拉取（非 GKI 路径） | 工作流步骤 |
 
-> 注意: 所有补丁基于内核提交 **`4238ee49a84b`** 生成。工作流会自动 `git checkout 4238ee49a84b`
-> 固定该提交以保证补丁干净应用。若 LineageOS 上游有重大更新导致补丁失败, 请基于新提交重新生成补丁:
-> ```bash
-> git diff <新base> -- <susfs相关文件> > Patches/Patch/susfs_patch_to_4.19.patch
-> ```
+> 所有 OOS 补丁基于内核提交 `1d2678a3548f`（OOS13.1 最终版, 4.19.157-perf）生成。
+
+## SUSFS 重新生成说明 (OOS 4.19.157)
+
+OP8/LOS 项目的补丁（4.19.325）**无法干净应用到 OOS**（namei/namespace 布局不同）。
+OOS 补丁基于 **JackA1ltman 的通用 4.19 补丁**（它针对 OOS 同款的旧 `vfs_kern_mount` 结构），
+再针对 OOS 手工修复：
+
+- `fs/namespace.c`: OOS 多了 `CONFIG_OPLUS_SECURE_GUARD` include 块 → hunk#1 手工修
+- `fs/notify/fdinfo.c`: OOS 已有部分 SUSFS 签名（3参 show_fdinfo）→ hunk#4 函数体手工修
+- `drivers/input/input.c`: OOS 有 `OPLUS_FEATURE_SAUPWK` 块 → input hook 相应放置
+- `fs/read_write.c`: OOS 有 `OPLUS_FEATURE_IOMONITOR` 块 → sys_read hook 适配
+- `fs/stat.c`: `ksu_handle_stat` 手工补（OOS 的 SUSFS 补丁不含它）
+
+ReKernel 去重需要 `proc->outstanding_txns`（binder ≥5.4）。OOS 4.19.157 没有该字段，
+因此移除了 `binder_can_update_transaction`/`binder_find_outdated_transaction_ilocked` 及释放块，
+仅保留 `rekernel_binder_transaction` 上报功能。
 
 ## 关键配置项 (build-oneplus-8-los23-a16.yml)
 
-- `KERNEL_SOURCE/Branch`: LineageOS 官方仓库 `lineage-23.2`
-- `MERGE_CONFIG_FILES: vendor/oplus.config` — **必须保留** (schgm-flash.c 需要 CONFIG_OPLUS_SM8250_CHARGER)
-- `KERNELSU_AUTO_FORK: resukisu` — 自动获取最新 ReSukiSU
-- dtb: 构建后自定义步骤拼接 `kona.dtb + kona-v2.dtb + kona-v2.1.dtb` → `dtb.img` (与官方 DTB_SZ 一致)
-- dtbo: 不打包 (NEED_DTBO=false, 沿用系统分区的 dtbo)
+- `KERNEL_SOURCE/Branch`: 一加 OSS 官方仓库, `oneplus/sm8250_t_13.1_op8`
+- `VENDOR_SOURCE/Branch`: `android_kernel_modules_and_devicetree_oneplus_sm8250`, `oneplus/sm8250_t_13.1_op8`
+- `MERGE_CONFIG_FILES`: 空 — OOS defconfig 已内嵌 `CONFIG_OPLUS_SM8250_CHARGER` 等
+- `DEFCONFIG_NAME`: `vendor/kona-perf_defconfig`
+- DTB: 非 overlay 构建生成 `kona-mtp.dtb`（设备树 19821），由此构建 dtb.img
 
-## 与 Jack 原版格式的差异（有意为之）
+## OOS vendor/devicetree 布局
 
-- `patch-no-kprobe` 步骤/动作已移除: 其 `susfs_inline_hook_patches.sh` 面向 KSU v1.x
-  bool 钩子与旧版 selinux 修改, 与 ReSukiSU inline 模式不兼容 (seccomp filter_count
-  在 4.19 上由 kernel_compat.mk 条件编译排除, 无需补丁); 其 selinuxfs 静态符号移除
-  部分因本内核 CONFIG_KALLSYMS_ALL=y 而跳过, 无实际作用
-- 仅保留 4.19 版本的 susfs 补丁 (设备内核版本固定, 无需 4.4/4.9/5.4 等)
-- ReKernel 直接用补丁集成 (ReKernel-X v8.5), 不使用其 rekernel_patches.sh 脚本
-- HOOK_METHOD 变量保留但无实际作用: ReSukiSU inline 钩子由 resukisu_inline_hooks.patch 提供
-
-## 补丁记录存档 (Patches/Archive/)
-
-开发过程中的完整补丁记录: `0000-full-all-changes.patch` (全量合集)、
-`0001-resukisu-susfs.patch` (ReSukiSU+SUSFS v2.2.0 完整集成)、
-`0001-rekernel.patch` / `0001-droidspaces-cgroup-prefix.patch` /
-`0001-baseband-guard.patch` / `0001-defconfig.patch` 及 `README.md` (开发记录)。
-工作流实际使用 `Patches/Patch/` 与 `Patches/Rekernel/`, Archive 仅存档。
-
-## 已知限制
-
-- 构建需要 x86_64 环境 (GitHub Actions 默认 runner 即可)
-- SUSFS v2.2.0 的 OPEN_REDIRECT 实际重定向在 4.19 上不生效 (架构限制, 与官方一致)
-- 若使用本地构建 (非 GitHub Actions), 内存 ≥ 8G 且用 `make -j2` (手机本体构建严禁 -j8)
+一加官方构建把内核放在某层级使 `arch/arm64/boot/dts/../../../../../../vendor` 能解析。
+本工作流 `device_kernel` 位于 `$GITHUB_WORKSPACE/device_kernel`，其 6 层上级是
+`$GITHUB_WORKSPACE`，故 `vendor` 放在 `$GITHUB_WORKSPACE/vendor`。
+`build-ready` clone modules_and_devicetree 仓库并把 `vendor/` 移到该处，然后校验关键 symlink。
 
 ## 鸣谢
 
-- [JackA1ltman/NonGKI_Kernel_Build_2nd](https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd) — 项目格式与 4.19 移植方法
-- [ReSukiSU](https://github.com/ReSukiSU/ReSukiSU) / [SuSFS](https://gitlab.com/simonpunk/susfs4ksu) / [Re:Kernel](https://github.com/Sakion-Team/Re-Kernel) / [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) / [Baseband-guard](https://github.com/vc-teahouse/Baseband-guard)
+[OnePlusOSS](https://github.com/OnePlusOSS) · [ReSukiSU](https://github.com/ReSukiSU/ReSukiSU) ·
+[SuSFS](https://gitlab.com/simonpunk/susfs4ksu) · [Re:Kernel](https://github.com/Sakion-Team/Re-Kernel) ·
+[Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) · [Baseband-guard](https://github.com/vc-teahouse/Baseband-guard) ·
+[JackA1ltman/NonGKI_Kernel_Build_2nd](https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd)

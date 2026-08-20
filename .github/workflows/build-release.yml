@@ -36,7 +36,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.build-kernel == true
     env:
       REPO_OWNER: Hotsteel2901
-      REPO_NAME: NonGKI_Kernel_Build_OP8
+      REPO_NAME: Nongki_OP8_OOS_build
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       RELEASE_NAME: "Pre-built"
       RELEASE_NOTES: |
@@ -44,7 +44,7 @@ jobs:
 
         | Device Name | Codename | Kernel | System | Android | Method | KernelSU | SuSFS | Re:Kernel | BBG | DroidSpace | 
         |----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
-        | OnePlus 8 | instantnoodle | 4.19 | Lineage Based OS | 16 | AnyKernel3 | ReSukiSU | ✓ | ✓ | ✓ | ✓ |
+        | OnePlus 8 | instantnoodle | 4.19 | OxygenOS 13.1 | 13 | AnyKernel3 | ReSukiSU | ✓ | ✓ | ✓ | ✓ |
 
         - Specific device information: [Supported List](Supported_list.md).
         - The KernelSU version is for reference only. It is normal for the KernelSU version embedded in SUSFS to be lower.

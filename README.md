@@ -1,60 +1,83 @@
-# NonGKI_Kernel_Build_OP8
+# Nongki_OP8_OOS_build
 
-Automated kernel build for **OnePlus 8 (instantnoodle, 4.19.325-cip132-st16)** with **LineageOS 23.2 (Android 16)**.
-Formatted after [JackA1ltman/NonGKI_Kernel_Build_2nd](https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd) (sample branch).
-Chinese docs: [README_cn.md](README_cn.md)
+Automated kernel build for **OnePlus 8 (instantnoodle, 4.19.157-perf+)** with **OxygenOS 13.1 (Android 13)**.
+A fork of [NonGKI_Kernel_Build_OP8](https://github.com/Hotsteel2901/NonGKI_Kernel_Build_OP8) re-targeted from
+LineageOS 23.2 (A16) to the **OnePlus OSS official kernel (OnePlusOS)**.
+
+## ⚠️ Key difference vs the LineageOS fork
+
+The OnePlus OSS kernel (`OnePlusOSS/android_kernel_oneplus_sm8250`, branch `oneplus/sm8250_t_13.1_op8`,
+`4.19.157`) is an **older 4.19 structure** and has **no device tree in-tree**:
+
+- `arch/arm64/boot/dts/vendor` is a symlink → `../../../../../../vendor/qcom/proprietary/devicetree-4.19`
+- 86+ symlinks point into `vendor/oplus/kernel/*` (charger, touchpanel, oplus_performance, network, ...)
+- **These must be supplied from a separate repo:**
+  `OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250` (branch `oneplus/sm8250_t_13.1_op8`)
+- The workflow clones that repo and places it so the symlinks resolve (see below).
 
 ## Integrations
+
 | Component | Note |
 |---|---|
 | ReSukiSU | KernelSU fork, CONFIG_KSU_SUSFS (inline hook) mode |
-| SUSFS v2.2.0 | Official gki v2.2.0 + JackA1ltman's proven 4.19 adaptations (i_state flags / p->state=0 / legacy fsnotify API) |
-| Re:Kernel | v8.5 (ReKernel-X), CONFIG_REKERNEL_NETWORK=n |
+| SUSFS v2.2.0 | Re-generated for OOS 4.19.157 old structure (uses `vfs_kern_mount`, no `ND_STATE`) |
+| Re:Kernel | v8.5, **dedup feature disabled** (OOS binder lacks `proc->outstanding_txns`); reporting only |
 | DroidSpaces | cgroup prefix hiding + Non-GKI configs (incl. USER_NS) |
-| Baseband Guard | partition write protection LSM |
+| Baseband Guard | non-GKI / pre-5.1 LSM style (`security_add_hooks_compat`, no `DEFINE_LSM`) |
 
 ## Usage
+
 1. Fork this repo, enable **Actions** with `Read and write permissions`.
 2. Run the `Build Kernel` workflow (or push to trigger).
-3. Download the zip artifact and flash it via recovery (AnyKernel3 style).
-4. Verify in KernelSU Manager: SUSFS version **2.2.0**, allowlist & modules working.
+3. Download the zip artifact and flash via recovery (AnyKernel3 style).
+4. Verify in KernelSU Manager.
 
 ## Patches (Patches/)
+
 | File | Content | Applied by |
 |---|---|---|
-| `Patch/susfs_patch_to_4.19.patch` | SUSFS v2.2.0 kernel-side code | patch-susfs action |
-| `Patch/resukisu_inline_hooks.patch` | ReSukiSU inline hooks (7 hooks) | custom workflow step |
-| `Rekernel/rekernel_extra.patch` | Re:Kernel (driver + binder + signal + registration) | patch-rekernel action |
-| `Droidspaces/*` | droidspaces.config + 2 cocci scripts | patch-droidspaces action |
+| `Patch/susfs_resukisu_oos_4.19.patch` | SUSFS v2.2.0 (4.19.157) + ReSukiSU inline hooks (7 hooks) | workflow step |
+| `Patch/defconfig_oos.patch` | KSU/SUSFS/ReKernel/BBG/DroidSpaces Non-GKI configs | workflow step |
+| `Rekernel/rekernel_oos_4.19.patch` | Re:Kernel (binder report + signal) **dedup removed** | workflow step |
+| `Droidspaces/oos_droidspaces.patch` | cgroup prefix + xt_qtaguid panic fix | workflow step |
+| Baseband Guard | fetched at build time via `setup.sh` (non-GKI path) | workflow step |
 
-> All patches are generated against kernel commit `4238ee49a84b`; the workflow pins that commit (`git checkout 4238ee49a84b`).
-> Regenerate patches after upstream changes:
-> ```bash
-> git diff <new-base> -- <susfs-files> > Patches/Patch/susfs_patch_to_4.19.patch
-> ```
+> All OOS patches are generated against kernel commit `1d2678a3548f` (OOS13.1 final, 4.19.157-perf).
+
+## SUSFS re-generation notes (OOS 4.19.157)
+
+The OP8/LOS patch (4.19.325) does **not** apply cleanly to OOS (different namei/namespace layout).
+The OOS patch is based on **JackA1ltman's generic 4.19 patch** which targets the older
+`vfs_kern_mount` structure that OOS shares, then manually fixed for OOS:
+
+- `fs/namespace.c`: OOS has an extra `CONFIG_OPLUS_SECURE_GUARD` include block → hunk#1 fixed manually
+- `fs/notify/fdinfo.c`: OOS already had partial SUSFS signatures (3-arg show_fdinfo) → hunk#4 body fixed manually
+- `drivers/input/input.c`: OOS has `OPLUS_FEATURE_SAUPWK` block → input hook placed accordingly
+- `fs/read_write.c`: OOS has `OPLUS_FEATURE_IOMONITOR` block → sys_read hook adapted
+- `fs/stat.c`: `ksu_handle_stat` added manually (SUSFS patch doesn't include it for OOS)
+
+ReKernel dedup needs `proc->outstanding_txns` (binder ≥5.4). OOS 4.19.157 lacks it, so
+`binder_can_update_transaction`/`binder_find_outdated_transaction_ilocked` and the free block were removed;
+only `rekernel_binder_transaction` reporting remains.
 
 ## Key settings (build-oneplus-8-los23-a16.yml)
-- `KERNEL_SOURCE/Branch`: LineageOS official repo, `lineage-23.2`
-- `MERGE_CONFIG_FILES: vendor/oplus.config` — **required** (schgm-flash.c needs CONFIG_OPLUS_SM8250_CHARGER)
-- ReSukiSU stays **latest** (setup.sh git pull each run)
-- dtb: custom step concatenates `kona.dtb + kona-v2.dtb + kona-v2.1.dtb` → `dtb.img`; dtbo not packed (stock partition used)
 
-## Deviations from Jack's original (intentional)
-- `patch-no-kprobe` removed: its hook scripts target KSU v1.x bool hooks (incompatible with ReSukiSU inline); its selinuxfs static-symbol removal is skipped anyway (CONFIG_KALLSYMS_ALL=y)
-- Only the 4.19 susfs patch is kept (fixed device kernel version)
-- ReKernel integrated via patch (ReKernel-X v8.5) instead of his rekernel_patches.sh
-- HOOK_METHOD kept but inert: ReSukiSU inline hooks come from resukisu_inline_hooks.patch
+- `KERNEL_SOURCE/Branch`: OnePlus OSS repo, `oneplus/sm8250_t_13.1_op8`
+- `VENDOR_SOURCE/Branch`: `android_kernel_modules_and_devicetree_oneplus_sm8250`, `oneplus/sm8250_t_13.1_op8`
+- `MERGE_CONFIG_FILES`: empty — OOS defconfig already embeds `CONFIG_OPLUS_SM8250_CHARGER` etc.
+- `DEFCONFIG_NAME`: `vendor/kona-perf_defconfig`
+- DTB: non-overlay build produces `kona-mtp.dtb` (device tree 19821); dtb.img built from it
 
-## Patch Record Archive (Patches/Archive/)
+## OOS vendor/devicetree layout
 
-Complete patch records from local development:
-- `0000-full-all-changes.patch` — full combined patch set
-- `0001-resukisu-susfs.patch` — ReSukiSU+SUSFS v2.2.0 complete integration (namei/namespace/proc etc.)
-- `0001-rekernel.patch` / `0001-droidspaces-cgroup-prefix.patch` / `0001-baseband-guard.patch` / `0001-defconfig.patch`
-- `README-record.md` — development log (version history / known issues / build notes)
-
-> Note: the workflows actually use the patches under `Patches/Patch/` and `Patches/Rekernel/`;
-> `Archive/` is for record only and is not used in builds.
+OnePlus official builds place the kernel so `arch/arm64/boot/dts/../../../../../../vendor` resolves.
+In this workflow `device_kernel` sits at `$GITHUB_WORKSPACE/device_kernel`, so the 6-level-up target is
+`$GITHUB_WORKSPACE/vendor`. `build-ready` clones the modules_and_devicetree repo and moves its `vendor/`
+there, then verifies the critical symlinks resolve.
 
 ## Credits
-[JackA1ltman/NonGKI_Kernel_Build_2nd](https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd) · [ReSukiSU](https://github.com/ReSukiSU/ReSukiSU) · [SuSFS](https://gitlab.com/simonpunk/susfs4ksu) · [Re:Kernel](https://github.com/Sakion-Team/Re-Kernel) · [Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) · [Baseband-guard](https://github.com/vc-teahouse/Baseband-guard)
+
+[OnePlusOSS](https://github.com/OnePlusOSS) · [ReSukiSU](https://github.com/ReSukiSU/ReSukiSU) ·
+[SuSFS](https://gitlab.com/simonpunk/susfs4ksu) · [Re:Kernel](https://github.com/Sakion-Team/Re-Kernel) ·
+[Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) · [Baseband-guard](https://github.com/vc-teahouse/Baseband-guard) ·
+[JackA1ltman/NonGKI_Kernel_Build_2nd](https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd)

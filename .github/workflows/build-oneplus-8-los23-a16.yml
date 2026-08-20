@@ -1,4 +1,4 @@
-name: Build Oneplus 8 (LineageOS 23.2 A16) (ReSukiSU+SUSFS Kernel)
+name: Build Oneplus 8 (OxygenOS 13.1 A13) (ReSukiSU+SUSFS Kernel)
 
 on:
   workflow_call:
@@ -12,8 +12,14 @@ env:
   CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-gnu-"
   EXTRA_CMDS : ""
 
-  KERNEL_SOURCE : "https://github.com/LineageOS/android_kernel_oneplus_sm8250.git"
-  KERNEL_BRANCH : "lineage-23.2"
+  # OOS 官方内核 (OnePlus OSS, 4.19.157) - 设备树在独立仓库
+  KERNEL_SOURCE : "https://github.com/OnePlusOSS/android_kernel_oneplus_sm8250.git"
+  KERNEL_BRANCH : "oneplus/sm8250_t_13.1_op8"
+
+  # OOS 官方 vendor/devicetree 仓库 (含 oplus 内核模块 + kona DTS + 19821 设备树)
+  # symlink 指向 vendor/, 需按 OnePlus 官方目录布局放置
+  VENDOR_SOURCE : "https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250.git"
+  VENDOR_BRANCH : "oneplus/sm8250_t_13.1_op8"
 
   CLANG_SOURCE : "https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-Linux-X64.tar.xz"
   CLANG_BRANCH : ""
@@ -33,8 +39,8 @@ env:
   KERNELSU_BRANCH : ""
 
   # 保持 latest: 每次构建都会通过 ReSukiSU setup.sh (git pull) 拉取最新 main 分支
-  KERNELSU_AUTO_GET : "true" # if u want easy setting kernelsu, u can true.
-  KERNELSU_AUTO_FORK : "resukisu" # xxksu, rsuntk, next, resukisu and sukisu
+  KERNELSU_AUTO_GET : "true"
+  KERNELSU_AUTO_FORK : "resukisu"
 
   SUSFS_ENABLE : true
   SUSFS_FIXED : false
@@ -47,7 +53,7 @@ env:
   NEED_DTBO : false
   NEED_SAFE_DTBO : false
 
-  ROM_TEXT : "lineage23.2_a16"
+  ROM_TEXT : "oos13.1_a13"
 
   # Other env
   PYTHON_VERSION: "3"
@@ -64,10 +70,11 @@ env:
   SUSFS_PATCH_FIXED: ""
 
   REKERNEL_ENABLE: "true"
-  DROIDSPACES_ENABLE: "true"
+  # DroidSpaces 配置已通过 defconfig_oos.patch 注入, 无需 build-process 再 merge droidspaces.config
+  DROIDSPACES_ENABLE: "false"
   NOMOUNT_ENABLE: "false"
 
-  HOOK_METHOD: "syscall" # Manual hook method -> syscall.
+  HOOK_METHOD: "syscall"
 
   KERNEL_PATCH: "false"
 
@@ -79,20 +86,22 @@ env:
   BASEBAND_GUARD_ENABLE: "true"
   BASEBAND_GUARD_BOOT: "false"
 
-  GENERATE_DTB: "false" # if u kernel need DTB , but cannot auto generate it. (Only Anykernel3).
+  # OOS 设备树直接编译 (非overlay), 通过 OnePlus 官方 Makefile 生成
+  GENERATE_DTB: "false"
   GENERATE_CHIP: "qcom"
 
   BUILD_DEBUGGER: "false"
   SKIP_PATCH: "false"
 
-  BUILD_OTHER_CONFIG: "true" # Merge config files.
-  MERGE_CONFIG_FILES: "vendor/oplus.config"
+  # OOS defconfig 已内嵌 oplus 配置, 无需额外 merge oplus.config
+  BUILD_OTHER_CONFIG: "false"
+  MERGE_CONFIG_FILES: ""
 
   FREE_MORE_SPACE: "false"
 
 jobs:
   build-kernel:
-    name: Oneplus 8 (LineageOS 23.2 A16) (ReSukiSU+SUSFS Kernel)
+    name: Oneplus 8 (OxygenOS 13.1 A13) (ReSukiSU+SUSFS Kernel)
     runs-on: ubuntu-latest
     env:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
@@ -109,50 +118,96 @@ jobs:
       - name: ⚙️ Get neccssary tools
         uses: ./.github/workflows/build-ready
 
-      - name: 📌 Use latest kernel source (no pinned checkout)
+      - name: 🏗️ Setup OOS vendor/devicetree layout
+        run: |
+          # OnePlus OOS 内核的 vendor symlink 指向 ../../../../../../vendor
+          # (从 arch/arm64/boot/dts 上溯 6 层), 需把 devicetree+oplus 源码放到对应位置
+          # 布局: <ROOT>/kernel_src/arch/arm64/boot/dts -> 6层 -> <ROOT>/vendor
+          # 本 workflow 中 device_kernel 位于 $GITHUB_WORKSPACE/device_kernel
+          # 其 6 层上级为 $GITHUB_WORKSPACE, 故 vendor 放在 $GITHUB_WORKSPACE/vendor
+          cd $GITHUB_WORKSPACE
+          if [ ! -d vendor ]; then
+            echo "[-] vendor/ not found, devicetree missing."
+            false
+          fi
+          # 验证关键 symlink 可解析 (devicetree + oplus kernel)
+          cd device_kernel
+          for check in arch/arm64/boot/dts/vendor drivers/soc/oplus/system drivers/power/oplus fs/erofs; do
+            if [ -e "$check" ]; then
+              echo "[+] $check -> $(readlink -f $check)"
+            else
+              echo "[-] $check cannot resolve, OOS build will fail."
+              false
+            fi
+          done
+          echo "[+] OOS vendor/devicetree layout ready."
+
+      - name: 📌 Kernel version suffix (OOS)
         run: |
           cd $GITHUB_WORKSPACE/device_kernel
-          grep -q "kernelsu" drivers/Makefile || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> drivers/Makefile
-          grep -q "source \"drivers/kernelsu/Kconfig\"" drivers/Kconfig || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" drivers/Kconfig
-          echo "-g$(git rev-parse --short HEAD)-hotsteel" > .scmversion
+          # ReSukiSU setup.sh 已注册 drivers/kernelsu (Makefile+Kconfig)
+          # 这里仅设置自定义版本后缀
+          echo "-g$(git rev-parse --short HEAD)-oos-hotsteel" > .scmversion
+          echo "[+] .scmversion written."
 
-      - name: 🪝 Patch Kernel of SUSFS
-        uses: ./.github/workflows/patch-susfs
-
-      - name: 🔗 Patch ReSukiSU Inline Hooks
+      - name: 🪝 Patch Kernel of SUSFS + ReSukiSU (OOS)
         run: |
           cd $GITHUB_WORKSPACE/device_kernel/
-          cp /tmp/Patches/Patch/resukisu_inline_hooks.patch ./
-          patch -p1 < resukisu_inline_hooks.patch || true
-          rm -f resukisu_inline_hooks.patch
-          echo "[+] ReSukiSU inline hooks patched."
+          cp /tmp/Patches/Patch/susfs_resukisu_oos_4.19.patch ./
+          patch -p1 < susfs_resukisu_oos_4.19.patch || true
+          rm -f susfs_resukisu_oos_4.19.patch
+          echo "[+] OOS SUSFS + ReSukiSU patched."
 
-      - name: 🪛 Extra Kernel Options
+      - name: 🧰 Patch Kernel of Re:Kernel (OOS)
         run: |
-          # Only ${{ env.DEVICE_NAME }} use it.
-          cd $GITHUB_WORKSPACE/device_kernel
+          cd $GITHUB_WORKSPACE/device_kernel/
+          cp /tmp/Patches/Rekernel/rekernel_oos_4.19.patch ./
+          patch -p1 < rekernel_oos_4.19.patch || true
+          rm -f rekernel_oos_4.19.patch
+          grep -q "rekernel" drivers/Makefile || printf "\nobj-\$(CONFIG_REKERNEL) += rekernel/\n" >> drivers/Makefile
+          grep -q "source \"drivers/rekernel/Kconfig\"" drivers/Kconfig || sed -i "/endmenu/i\source \"drivers/rekernel/Kconfig\"" drivers/Kconfig
+          echo "[+] Patched Re:Kernel for OOS successfully."
 
-      - name: 🧰 Patch Kernel of Re:Kernel
-        uses: ./.github/workflows/patch-rekernel
+      - name: 💿 Patch Kernel of Droidspaces (OOS)
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel/
+          cp /tmp/Patches/Droidspaces/oos_droidspaces.patch ./
+          patch -p1 < oos_droidspaces.patch || true
+          rm -f oos_droidspaces.patch
+          echo "[+] Patched DroidSpaces for OOS successfully."
 
-      - name: 💿 Patch Kernel of Droidspaces
-        uses: ./.github/workflows/patch-droidspaces
+      - name: 🔒 Patch Kernel of Baseband Guard (OOS, non-GKI)
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel/
+          wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          echo "[+] Patched Baseband Guard for OOS successfully."
 
-      - name: 🔒 Patch Kernel of Baseband Guard
-        uses: ./.github/workflows/patch-baseband-guard
+      - name: 📝 Apply OOS defconfig fragment
+        run: |
+          cd $GITHUB_WORKSPACE/device_kernel/
+          cp /tmp/Patches/Patch/defconfig_oos.patch ./
+          patch -p1 < defconfig_oos.patch || true
+          rm -f defconfig_oos.patch
+          echo "[+] OOS defconfig applied."
 
       - name: 🚀 Build Process
         uses: ./.github/workflows/build-process
 
-      - name: 🖼️ Generate DTB (kona + kona-v2 + kona-v2.1)
+      - name: 🖼️ Generate DTB (OOS: concat kona dtb variants)
         run: |
           cd $GITHUB_WORKSPACE/device_kernel
-          cat out/arch/arm64/boot/dts/vendor/oplus/kona.dtb out/arch/arm64/boot/dts/vendor/oplus/kona-v2.dtb out/arch/arm64/boot/dts/vendor/oplus/kona-v2.1.dtb > out/arch/arm64/boot/dtb.img
-          echo "[+] Generated dtb.img"
+          DTB_DIR="out/arch/arm64/boot/dts/vendor/19821"
+          if [ -f "$DTB_DIR/kona-mtp.dtb" ]; then
+            cat "$DTB_DIR/kona-mtp.dtb" > out/arch/arm64/boot/dtb.img
+            echo "[+] Generated dtb.img from kona-mtp.dtb"
+          else
+            # 回退: 拼接 vendor 下所有 dtb (与 OnePlus 官方 AndroidKernel.mk 一致)
+            cat out/arch/arm64/boot/dts/vendor/*/*.dtb > out/arch/arm64/boot/dtb.img
+            echo "[+] Generated dtb.img (concat all vendor dtbs)"
+          fi
 
       - name: 🔩 Pack Process
         uses: ./.github/workflows/pack-process
 
       - name: ✏️ Upload Artifacts
         uses: ./.github/workflows/upload-files
-
