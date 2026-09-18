@@ -199,6 +199,23 @@ jobs:
             false
           fi
 
+      - name: 🩹 Supply missing smb5-reg.h for charger driver
+        run: |
+          # Same pattern as storm-watch.h and battery.h: oplus_battery_msm8250.c
+          # includes "../../../../kernel/msm-4.19/drivers/power/supply/qcom/smb5-reg.h",
+          # resolving to the same vendor/kernel/msm-4.19/... path. Real file
+          # is at drivers/power/supply/qcom/smb5-reg.h in the kernel source.
+          SRC="$GITHUB_WORKSPACE/kernel/device_kernel/drivers/power/supply/qcom/smb5-reg.h"
+          DEST_DIR="$GITHUB_WORKSPACE/vendor/kernel/msm-4.19/drivers/power/supply/qcom"
+          if [ -f "$SRC" ]; then
+            mkdir -p "$DEST_DIR"
+            cp "$SRC" "$DEST_DIR/smb5-reg.h"
+            echo "[+] Copied smb5-reg.h to $DEST_DIR/."
+          else
+            echo "[-] $SRC not found — check if the path changed."
+            false
+          fi
+
       - name: 📌 Kernel version suffix (OOS)
         run: |
           cd $GITHUB_WORKSPACE/kernel/device_kernel
