@@ -162,6 +162,26 @@ jobs:
             false
           fi
 
+      - name: 🩹 Supply missing storm-watch.h for charger driver
+        run: |
+          # vendor/oplus/kernel/charger/charger_ic/oplus_battery_msm8250.h
+          # includes "../../../../kernel/msm-4.19/drivers/power/supply/qcom/storm-watch.h",
+          # which resolves (following the drivers/power/oplus symlink to its
+          # real directory) to $GITHUB_WORKSPACE/vendor/kernel/msm-4.19/drivers/power/supply/qcom/storm-watch.h.
+          # The real file exists in the kernel source at
+          # drivers/power/supply/qcom/storm-watch.h. Supply it at the exact
+          # path the include resolves to.
+          SRC="$GITHUB_WORKSPACE/kernel/device_kernel/drivers/power/supply/qcom/storm-watch.h"
+          DEST_DIR="$GITHUB_WORKSPACE/vendor/kernel/msm-4.19/drivers/power/supply/qcom"
+          if [ -f "$SRC" ]; then
+            mkdir -p "$DEST_DIR"
+            cp "$SRC" "$DEST_DIR/storm-watch.h"
+            echo "[+] Copied storm-watch.h to $DEST_DIR/."
+          else
+            echo "[-] $SRC not found — check if the path changed."
+            false
+          fi
+
       - name: 📌 Kernel version suffix (OOS)
         run: |
           cd $GITHUB_WORKSPACE/kernel/device_kernel
