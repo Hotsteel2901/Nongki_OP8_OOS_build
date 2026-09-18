@@ -144,6 +144,24 @@ jobs:
           done
           echo "[+] OOS vendor/devicetree layout ready."
 
+      - name: 🩹 Supply missing kona-camera-sensor-rb5.dtsi for 19066
+        run: |
+          # arch/arm64/boot/dts/vendor/19066/kona-v2.1-iot-rb5.dtsi includes
+          # "camera/kona-camera-sensor-rb5.dtsi", which OnePlus's published
+          # source has at vendor/qcom/proprietary/camera-devicetree/ but not
+          # inside the 19066/camera/ folder itself. Supply it from the
+          # existing published copy.
+          SRC="$GITHUB_WORKSPACE/vendor/qcom/proprietary/camera-devicetree/kona-camera-sensor-rb5.dtsi"
+          DEST_DIR="$GITHUB_WORKSPACE/vendor/qcom/proprietary/devicetree-4.19/19066/camera"
+          if [ -f "$SRC" ]; then
+            mkdir -p "$DEST_DIR"
+            cp "$SRC" "$DEST_DIR/kona-camera-sensor-rb5.dtsi"
+            echo "[+] Copied kona-camera-sensor-rb5.dtsi into 19066/camera/."
+          else
+            echo "[-] $SRC not found — check if OnePlus moved/renamed this file."
+            false
+          fi
+
       - name: 📌 Kernel version suffix (OOS)
         run: |
           cd $GITHUB_WORKSPACE/kernel/device_kernel
