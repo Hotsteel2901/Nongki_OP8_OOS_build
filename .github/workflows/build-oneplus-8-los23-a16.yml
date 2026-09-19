@@ -209,6 +209,32 @@ jobs:
             false
           fi
 
+      - name: 🩹 Fix disabled oplus_adfr build (techpack/display/msm/Makefile)
+        run: |
+          # techpack/display/msm/Makefile gates oplus_adfr.o (the whole ADFR/
+          # adaptive-frame-rate implementation) behind $(OPLUS_FEATURE_ADFR_KERNEL).
+          # That flag IS set (OPLUS_FEATURE_ADFR_KERNEL=yes) in the kernel's own
+          # oplus_native_features.mk, pulled in via `-include OplusKernelEnvConfig.mk`
+          # in the top-level Makefile — so the flag isn't missing, it's just never
+          # exported, so it doesn't survive into the separate $(MAKE) sub-process
+          # Kbuild spawns to build techpack/display. Same root cause as the
+          # router_boost fix above: net/Makefile's neighbouring OPLUS_FEATURE_DHCP
+          # and OPLUS_FEATURE_WIFI_CAP_CENTER blocks already work around this by
+          # re-declaring the flag locally right above their own check — ADFR's
+          # Makefile just never got that same treatment. sde_encoder.c, sde_kms.c,
+          # sde_connector.c, dsi_display.c, dsi_panel.c, msm_drv.c and the two
+          # oplus_display_*.c files all call oplus_adfr_* unconditionally, so
+          # without oplus_adfr.o they fail at link time. Add the same local
+          # re-declaration, matching the established net/Makefile pattern.
+          F="$GITHUB_WORKSPACE/kernel/device_kernel/techpack/display/msm/Makefile"
+          if grep -q '^ifeq (\$(OPLUS_FEATURE_ADFR_KERNEL),yes)$' "$F"; then
+            sed -i 's/^ifeq (\$(OPLUS_FEATURE_ADFR_KERNEL),yes)$/OPLUS_FEATURE_ADFR_KERNEL=yes\nifeq ($(OPLUS_FEATURE_ADFR_KERNEL),yes)/' "$F"
+            echo "[+] Added OPLUS_FEATURE_ADFR_KERNEL=yes to techpack/display/msm/Makefile."
+          else
+            echo "[-] Expected ifeq line not found in techpack/display/msm/Makefile — check if OnePlus changed it."
+            false
+          fi
+
       - name: 📌 Kernel version suffix (OOS)
         run: |
           cd $GITHUB_WORKSPACE/kernel/device_kernel
