@@ -196,6 +196,22 @@ jobs:
           rm -f defconfig_oos.patch
           echo "[+] OOS defconfig applied."
 
+      - name: 🩹 Export oplus_native_features.mk variables to the build environment
+        run: |
+          # oplus_native_features.mk is included by the top Makefile, but its plain
+          # assignments are NOT exported to kbuild's per-directory sub-makes. On the
+          # OnePlus Android build these are environment variables. Without them, the
+          # OPLUS_FEATURE_* gates in mm/, drivers/scsi/ufs/ ... silently skip objects
+          # (ufsfeature, ufs_signal_quality, ufs_latency_hist, task_mem, process_mm_reclaim).
+          F="$GITHUB_WORKSPACE/kernel/device_kernel/oplus_native_features.mk"
+          if [ ! -f "$F" ]; then
+            echo "[-] $F not found — check if OnePlus moved/renamed this file."
+            false
+          fi
+          grep -E '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*$' "$F" \
+            | grep -vE '^(OPLUS_NATIVE_FEATURE_SET|OPLUS_NATIVE_MACRO_FEATURES)=' >> "$GITHUB_ENV"
+          echo "[+] Exported $(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*$' "$F") variables from oplus_native_features.mk."
+
       - name: 🚀 Build Process
         uses: ./.github/workflows/build-process
 
