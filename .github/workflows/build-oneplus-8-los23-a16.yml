@@ -190,6 +190,25 @@ jobs:
             false
           fi
 
+      - name: 🩹 Fix disabled oplus_router_boost build (net/Makefile)
+        run: |
+          # net/Makefile gates oplus_router_boost/ behind $(OPLUS_FEATURE_WIFI_ROUTERBOOST),
+          # a plain Makefile variable that's never set anywhere, unlike its two
+          # sibling features (OPLUS_FEATURE_DHCP=1, OPLUS_FEATURE_WIFI_CAP_CENTER=1)
+          # which set the variable right above their own identical ifneq check.
+          # Callers in net/ipv4/tcp_ipv4.c and net/ipv4/udp.c call
+          # oplus_router_boost_handler unconditionally, so the module never
+          # gets built and the symbol is undefined at link time. Add the
+          # missing assignment, matching the existing pattern exactly.
+          F="$GITHUB_WORKSPACE/kernel/device_kernel/net/Makefile"
+          if grep -q '^ifneq (\$(OPLUS_FEATURE_WIFI_ROUTERBOOST),)$' "$F"; then
+            sed -i 's/^ifneq (\$(OPLUS_FEATURE_WIFI_ROUTERBOOST),)$/OPLUS_FEATURE_WIFI_ROUTERBOOST=1\nifneq ($(OPLUS_FEATURE_WIFI_ROUTERBOOST),)/' "$F"
+            echo "[+] Added OPLUS_FEATURE_WIFI_ROUTERBOOST=1 to net/Makefile."
+          else
+            echo "[-] Expected ifneq line not found in net/Makefile — check if OnePlus changed it."
+            false
+          fi
+
       - name: 📌 Kernel version suffix (OOS)
         run: |
           cd $GITHUB_WORKSPACE/kernel/device_kernel
