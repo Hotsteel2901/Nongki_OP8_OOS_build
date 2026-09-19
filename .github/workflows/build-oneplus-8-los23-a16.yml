@@ -244,7 +244,8 @@ jobs:
           echo "[+] .scmversion written."
 
       - name: 🪝 Patch Kernel of SUSFS + ReSukiSU (OOS)
-        run: ${{ env.SUSFS_ENABLE == 'true' }}
+        if: ${{ env.SUSFS_ENABLE == 'true' }}
+        run: |
           cd $GITHUB_WORKSPACE/kernel/device_kernel/
           cp /tmp/Patches/Patch/susfs_resukisu_oos_4.19.patch ./
           patch -p1 < susfs_resukisu_oos_4.19.patch || true
