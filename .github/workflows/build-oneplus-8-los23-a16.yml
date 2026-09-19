@@ -45,7 +45,7 @@ env:
   KERNELSU_AUTO_GET : "true"
   KERNELSU_AUTO_FORK : "resukisu"
 
-  SUSFS_ENABLE : true
+  SUSFS_ENABLE : false
   SUSFS_FIXED : false
 
   AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
@@ -244,7 +244,7 @@ jobs:
           echo "[+] .scmversion written."
 
       - name: 🪝 Patch Kernel of SUSFS + ReSukiSU (OOS)
-        run: |
+        run: ${{ env.SUSFS_ENABLE == 'true' }}
           cd $GITHUB_WORKSPACE/kernel/device_kernel/
           cp /tmp/Patches/Patch/susfs_resukisu_oos_4.19.patch ./
           patch -p1 < susfs_resukisu_oos_4.19.patch || true
