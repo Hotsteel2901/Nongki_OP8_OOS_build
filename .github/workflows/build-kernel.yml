@@ -14,5 +14,5 @@ jobs:
     name: "OnePlus 8 (OxygenOS 13.1 Android 13) (ReSukiSU+SUSFS v2.2.0)"
     strategy:
       fail-fast: true
-    uses: ./.github/workflows/build-oneplus-8-los23-a16.yml
+    uses: ./.github/workflows/build-oneplus-8-oos13.1.yml
     secrets: inherit
