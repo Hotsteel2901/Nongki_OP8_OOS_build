@@ -187,7 +187,7 @@ jobs:
           rm -f defconfig_oos.patch
           echo "[+] OOS defconfig applied."
 
-      - name: 🩹 Export oplus_native_features.mk variables to the build environment
+      - name: [1⁺] Apply OnePlus native features
         run: |
           # oplus_native_features.mk is included by the top Makefile, but its plain
           # assignments are NOT exported to kbuild's per-directory sub-makes. On the
