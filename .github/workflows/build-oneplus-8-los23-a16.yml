@@ -9,6 +9,8 @@ env:
   DEVICE_NAME : "oneplus_8"
   DEVICE_CODENAME : "instantnoodle"
 
+  BRAND_SHOW_FLAG : "oneplus"
+
   CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-android-"
   # OOS 4.19.157 旧代码 + clang 19: 禁用新 clang 默认 -Werror 严格警告
   # KCFLAGS 值必须用引号包裹(含空格), 否则 make 只取第一个参数
@@ -38,6 +40,8 @@ env:
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
+  KERNELSU_ENABLE : false
+
   KERNELSU_SOURCE : ""
   KERNELSU_BRANCH : ""
 
@@ -45,7 +49,7 @@ env:
   KERNELSU_AUTO_GET : "true"
   KERNELSU_AUTO_FORK : "resukisu"
 
-  SUSFS_ENABLE : true
+  SUSFS_ENABLE : false
   SUSFS_FIXED : false
 
   AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
@@ -125,7 +129,7 @@ jobs:
           # OnePlus OOS 内核的 vendor symlink 指向 ../../../../../../vendor
           # (从 arch/arm64/boot/dts 上溯 6 层), 需把 devicetree+oplus 源码放到对应位置
           # 布局: <ROOT>/kernel_src/arch/arm64/boot/dts -> 6层 -> <ROOT>/vendor
-          # 本 workflow 中 device_kernel 位于 $GITHUB_WORKSPACE/kernel/device_kernel
+          # 本 workflow 中 msm-4.19 位于 $GITHUB_WORKSPACE/kernel/msm-4.19
           # 其 6 层上级为 $GITHUB_WORKSPACE, 故 vendor 放在 $GITHUB_WORKSPACE/vendor
           cd $GITHUB_WORKSPACE
           if [ ! -d vendor ]; then
@@ -133,7 +137,7 @@ jobs:
             false
           fi
           # 验证关键 symlink 可解析 (devicetree + oplus kernel)
-          cd kernel/device_kernel
+          cd kernel/msm-4.19
           for check in arch/arm64/boot/dts/vendor drivers/soc/oplus/system drivers/power/oplus fs/erofs; do
             if [ -e "$check" ]; then
               echo "[+] $check -> $(readlink -f $check)"
@@ -146,15 +150,16 @@ jobs:
 
       - name: 📌 Kernel version suffix (OOS)
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
           # ReSukiSU setup.sh 已注册 drivers/kernelsu (Makefile+Kconfig)
           # 这里仅设置自定义版本后缀
           echo "-g$(git rev-parse --short HEAD)-oos-hotsteel" > .scmversion
           echo "[+] .scmversion written."
 
       - name: 🪝 Patch Kernel of SUSFS + ReSukiSU (OOS)
+        if: env.SUSFS_ENABLE == 'true'
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel/
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19/
           cp /tmp/Patches/Patch/susfs_resukisu_oos_4.19.patch ./
           patch -p1 < susfs_resukisu_oos_4.19.patch || true
           rm -f susfs_resukisu_oos_4.19.patch
@@ -162,7 +167,7 @@ jobs:
 
       - name: 💿 Patch Kernel of Droidspaces (OOS)
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel/
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19/
           cp /tmp/Patches/Droidspaces/oos_droidspaces.patch ./
           patch -p1 < oos_droidspaces.patch || true
           rm -f oos_droidspaces.patch
@@ -170,24 +175,40 @@ jobs:
 
       - name: 🔒 Patch Kernel of Baseband Guard (OOS, non-GKI)
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel/
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19/
           wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
           echo "[+] Patched Baseband Guard for OOS successfully."
 
       - name: 📝 Apply OOS defconfig fragment
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel/
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19/
           cp /tmp/Patches/Patch/defconfig_oos.patch ./
           patch -p1 < defconfig_oos.patch || true
           rm -f defconfig_oos.patch
           echo "[+] OOS defconfig applied."
+
+      - name: 🩹 Export oplus_native_features.mk variables to the build environment
+        run: |
+          # oplus_native_features.mk is included by the top Makefile, but its plain
+          # assignments are NOT exported to kbuild's per-directory sub-makes. On the
+          # OnePlus Android build these are environment variables. Without them, the
+          # OPLUS_FEATURE_* gates in mm/, drivers/scsi/ufs/ ... silently skip objects
+          # (ufsfeature, ufs_signal_quality, ufs_latency_hist, task_mem, process_mm_reclaim).
+          F="$GITHUB_WORKSPACE/kernel/msm-4.19/oplus_native_features.mk"
+          if [ ! -f "$F" ]; then
+            echo "[-] $F not found — check if OnePlus moved/renamed this file."
+            false
+          fi
+          grep -E '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*$' "$F" \
+            | grep -vE '^(OPLUS_NATIVE_FEATURE_SET|OPLUS_NATIVE_MACRO_FEATURES)=' >> "$GITHUB_ENV"
+          echo "[+] Exported $(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*$' "$F") variables from oplus_native_features.mk."
 
       - name: 🚀 Build Process
         uses: ./.github/workflows/build-process
 
       - name: 🖼️ Generate DTB (OOS concat kona dtb variants)
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
           DTB_DIR="out/arch/arm64/boot/dts/vendor/19821"
           if [ -f "$DTB_DIR/kona-mtp.dtb" ]; then
             cat "$DTB_DIR/kona-mtp.dtb" > out/arch/arm64/boot/dtb.img

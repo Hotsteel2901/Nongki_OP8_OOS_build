@@ -9,7 +9,7 @@ runs:
         with:
           name: Kernel-${{ env.PACK_NAME }}
           path: |
-            kernel/device_kernel/${{ env.PACK_NAME }}
+            kernel/msm-4.19/${{ env.PACK_NAME }}
 
       - name: Upload Build Artifacts For Boot Image
         if: env.PACK_METHOD == 'MKBOOTIMG'
