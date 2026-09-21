@@ -96,6 +96,16 @@ env:
   GENERATE_DTB: "false"
   GENERATE_CHIP: "qcom"
 
+  # devicetree-4.19/19821/Makefile's non-overlay branch has an upstream OnePlus typo
+  # (dtb-$(CONFIG_ARCH_LITO) instead of CONFIG_ARCH_KONA), so on a Kona defconfig it
+  # silently builds nothing for 19821 (the real OnePlus 8 profile). CONFIG_BUILD_ARM64_DT_OVERLAY=y
+  # (set in defconfig_oos.patch) switches 19821 to its overlay branch instead, which uses
+  # CONFIG_ARCH_KONA correctly — matching luk1337 and LineageOS's own kona-perf_defconfig.
+  # HAVE_NO_DTBO hooks mkdtimg into the kernel's own Makefile so `make` builds dtbo.img
+  # natively as part of the default target; Pack Process already picks up dtbo.img if present.
+  HAVE_NO_DTBO: "true"
+  HAVE_NO_DTBO_TOOL: "false"
+
   BUILD_DEBUGGER: "false"
   SKIP_PATCH: "false"
 
