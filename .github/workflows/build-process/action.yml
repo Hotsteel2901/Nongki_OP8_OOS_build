@@ -17,7 +17,7 @@ runs:
           cd $GITHUB_WORKSPACE/kernel/msm-4.19
           sed -i '/targets := Image Image.bz2 Image.gz Image.lz4 Image.lzma Image.lzo/s/$/ dtbo.img/' ./arch/"${{ env.KERNEL_ARCH }}"/boot/Makefile
           sed -i '/# Add RTIC DTB to the DTB list if RTIC MPGen is enabled/i \DTBO_OBJS := $(shell find $(obj)/dts/ -name \\*.dtbo)\n' arch/"${{ env.KERNEL_ARCH }}"/boot/Makefile
-          sed -i '/$(obj)\/Image\.gz-dtb: $(obj)\/Image\.gz $(DTB_OBJS) FORCE/a \#DTBO\n$(obj)\/dtbo.img: $(DTBO_OBJS) FORCE\n\t$(call if_changed,mkdtimg)' ./arch/"${{ env.KERNEL_ARCH }}"/boot/Makefile
+          sed -i '/^install:$/i \#DTBO\n$(obj)\/dtbo.img: $(DTBO_OBJS) FORCE\n\t$(call if_changed,mkdtimg)\n' ./arch/"${{ env.KERNEL_ARCH }}"/boot/Makefile
           sed -i '/KBUILD_DTBS\t:= dtbs/a \#DTBO\nKBUILD_DTBO_IMG := dtbo.img' ./arch/"${{ env.KERNEL_ARCH }}"/Makefile
           sed -i '/PHONY += vdso_install/i \ifeq ($(CONFIG_BUILD_ARM64_DT_OVERLAY),y)\n$(KBUILD_DTBO_IMG): dtbs\n\t$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@\n\nall: $(KBUILD_DTBO_IMG)\nendif' arch/"${{ env.KERNEL_ARCH }}"/Makefile
           sed -i '/dtc-tmp = $(subst $(comma),_,$(dot-target)\.dts\.tmp)/a \#DTBO\n# mkdtimg\n#----------------------------------------------------------------------------\nquiet_cmd_mkdtimg = DTBOIMG $@\ncmd_mkdtimg = python3 $(srctree)\/scripts\/dtc\/mkdtboimg.py create $@ --page_size=4096 $(filter-out FORCE,$^)' ./scripts/Makefile.lib
