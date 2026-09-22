@@ -9,13 +9,13 @@ runs:
           cd $GITHUB_WORKSPACE
 
           echo "::group::[+] Starting git clone kernel source code..."
-          # 内核放在 $GITHUB_WORKSPACE/kernel/device_kernel (深1层),
+          # 内核放在 $GITHUB_WORKSPACE/kernel/msm-4.19 (深1层),
           # 使 vendor symlink (../../../../../../vendor 从 dts 上溯6层) 能解析到 $GITHUB_WORKSPACE/vendor
           mkdir -p kernel
-          git clone --recursive "${{ env.KERNEL_SOURCE }}" -b "${{ env.KERNEL_BRANCH }}" kernel/device_kernel --depth=1
+          git clone --recursive "${{ env.KERNEL_SOURCE }}" -b "${{ env.KERNEL_BRANCH }}" kernel/msm-4.19 --depth=1
 
-          if [[ -f "kernel/device_kernel/.gitmodules" ]]; then
-            cd kernel/device_kernel
+          if [[ -f "kernel/msm-4.19/.gitmodules" ]]; then
+            cd kernel/msm-4.19
             git submodule init
             git submodule update
             cd ../../
@@ -27,8 +27,8 @@ runs:
 
           # Get Kernel Version
 
-          KERNEL_VERSION=$(head -n 3 $GITHUB_WORKSPACE/kernel/device_kernel/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')
-          echo "KERNEL_VERSION=$(head -n 3 kernel/device_kernel/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')" >> $GITHUB_ENV
+          KERNEL_VERSION=$(head -n 3 $GITHUB_WORKSPACE/kernel/msm-4.19/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')
+          echo "KERNEL_VERSION=$(head -n 3 kernel/msm-4.19/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')" >> $GITHUB_ENV
           echo "FIRST_VERSION=$(echo "$KERNEL_VERSION" | awk -F '.' '{print $1}')" >> $GITHUB_ENV
           echo "SECOND_VERSION=$(echo "$KERNEL_VERSION" | awk -F '.' '{print $2}')" >> $GITHUB_ENV
 
@@ -47,8 +47,8 @@ runs:
             # 2) techpack -> 填充 OOS 官方内核的空 gitlink
             for d in camera display video; do
               if [ -d "oos_vendor_tmp/kernel/msm-4.19/techpack/$d" ]; then
-                rm -rf kernel/device_kernel/techpack/$d
-                cp -r oos_vendor_tmp/kernel/msm-4.19/techpack/$d kernel/device_kernel/techpack/$d
+                rm -rf kernel/msm-4.19/techpack/$d
+                cp -r oos_vendor_tmp/kernel/msm-4.19/techpack/$d kernel/msm-4.19/techpack/$d
                 echo "[+] techpack/$d filled from modules_and_devicetree."
               else
                 echo "[-] techpack/$d not found in modules_and_devicetree."
@@ -64,7 +64,7 @@ runs:
 
           # 验证 techpack 子目录有 Makefile (可编译)
           for d in camera display video; do
-            if [ -f "kernel/device_kernel/techpack/$d/Makefile" ]; then
+            if [ -f "kernel/msm-4.19/techpack/$d/Makefile" ]; then
               echo "[+] techpack/$d/Makefile OK"
             else
               echo "[-] techpack/$d/Makefile MISSING"
@@ -73,7 +73,7 @@ runs:
           done
 
           # 验证关键 symlink 可解析 (OOS 构建前提)
-          cd kernel/device_kernel
+          cd kernel/msm-4.19
           echo "::endgroup::"
           for check in arch/arm64/boot/dts/vendor drivers/soc/oplus/system drivers/power/oplus fs/erofs drivers/input/touchscreen/oplus_touchscreen; do
             if [ -e "$check" ]; then
@@ -87,7 +87,7 @@ runs:
       - name: Get Kernel Arch
         shell: bash
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
 
           if [[ -d "arch/arm64/configs" ]]; then
             echo "KERNEL_ARCH=arm64" >> $GITHUB_ENV
@@ -104,7 +104,7 @@ runs:
           # Set ${{ env.PACK_METHOD }}
 
           if [[ "${{ env.PACK_METHOD }}" == "Anykernel3" ]]; then
-            cd $GITHUB_WORKSPACE/kernel/device_kernel
+            cd $GITHUB_WORKSPACE/kernel/msm-4.19
 
             if [[ -d "Anykernel3" ]]; then
               echo "[+] Found Anykernel3 in Kernel!"
@@ -125,7 +125,7 @@ runs:
             git clone https://android.googlesource.com/platform/system/tools/mkbootimg $GITHUB_WORKSPACE/mkboottools -b main-kernel-build-2024 --depth=1
             ${{ env.CURLX }} ${{ env.BOOT_SOURCE }} $GITHUB_WORKSPACE/boot_source_${{ env.DEVICE_NAME }}.img
             echo "[+] Get MKBOOTIMG successfully!"
-            cd kernel/device_kernel
+            cd kernel/msm-4.19
 
           else
             echo "[-] Need packing method! "
@@ -139,31 +139,32 @@ runs:
         if: env.DEFCONFIG_SOURCE != '' || env.DEFCONFIG_FROM_BOOT == 'true'
         shell: bash
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
 
           if [[ -n "${{ env.DEFCONFIG_SOURCE }}" ]]; then
-            ${{ env.CURLX }} ${{ env.DEFCONFIG_SOURCE }} kernel/device_kernel/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+            ${{ env.CURLX }} ${{ env.DEFCONFIG_SOURCE }} kernel/msm-4.19/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
 
           elif [[ -z "${{ env.DEFCONFIG_ORIGIN_IMAGE }}" ]]; then
             if [[ "${{ env.DEFCONFIG_FROM_BOOT }}" == "true" ]]; then
                 if [[ -f "${{ env.BOOT_SOURCE }}" ]]; then
                     ${{ env.CURLX }} "${{ env.BOOT_SOURCE }}" $GITHUB_WORKSPACE/boot.img
                     $GITHUB_WORKSPACE/mkboottools/unpack_bootimg.py --boot_img $GITHUB_WORKSPACE/boot.img
-                    mv $GITHUB_WORKSPACE/out/kernel $GITHUB_WORKSPACE/kernel/device_kernel/Image
-                    $GITHUB_WORKSPACE/kernel/device_kernel/scripts/extract-ikconfig $GITHUB_WORKSPACE/kernel/device_kernel/Image > $GITHUB_WORKSPACE/kernel/device_kernel/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+                    mv $GITHUB_WORKSPACE/out/kernel $GITHUB_WORKSPACE/kernel/msm-4.19/Image
+                    $GITHUB_WORKSPACE/kernel/msm-4.19/scripts/extract-ikconfig $GITHUB_WORKSPACE/kernel/msm-4.19/Image > $GITHUB_WORKSPACE/kernel/msm-4.19/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
 
                 fi
             else
-                ${{ env.CURLX }} "${{ env.DEFCONFIG_ORIGIN_IMAGE }}" $GITHUB_WORKSPACE/kernel/device_kernel/Image
-                $GITHUB_WORKSPACE/kernel/device_kernel/scripts/extract-ikconfig $GITHUB_WORKSPACE/kernel/device_kernel/Image > $GITHUB_WORKSPACE/kernel/device_kernel/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+                ${{ env.CURLX }} "${{ env.DEFCONFIG_ORIGIN_IMAGE }}" $GITHUB_WORKSPACE/kernel/msm-4.19/Image
+                $GITHUB_WORKSPACE/kernel/msm-4.19/scripts/extract-ikconfig $GITHUB_WORKSPACE/kernel/msm-4.19/Image > $GITHUB_WORKSPACE/kernel/msm-4.19/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
 
             fi
           fi
 
       - name: Cleaned KernelSU and Hook
+        if: env.KERNELSU_ENABLE == 'true'
         shell: bash
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
 
           echo "::group::[+] Starting clean hook..."
           cp /tmp/Bin/clean_hook.sh ./
@@ -172,9 +173,10 @@ runs:
           echo "[+] Cleaned hook."
 
       - name: Set KernelSU
+        if: env.KERNELSU_ENABLE == 'true'
         shell: bash
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
 
           # Function
           KERNELSU_AUTO(){
@@ -253,8 +255,8 @@ runs:
             elif [[ "${{ env.KERNELSU_METHOD }}" == "manual" ]]; then
                 git clone "https://github.com/$KERNELSU_AUTHOR/$KERNELSU_NAME.git" -b "$KERNELSU_BRANCH" "$KERNELSU_FOLDER"
                 ln -sf "../$KERNELSU_FOLDER/kernel" "drivers/kernelsu"
-                grep -q "kernelsu" "$GITHUB_WORKSPACE/kernel/device_kernel/drivers/Makefile" || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> $GITHUB_WORKSPACE/kernel/device_kernel/drivers/Makefile
-                grep -q "source \"drivers/kernelsu/Kconfig\"" "$GITHUB_WORKSPACE/kernel/device_kernel/drivers/Kconfig" || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" "${GITHUB_WORKSPACE}/device_kernel/drivers/Kconfig"
+                grep -q "kernelsu" "$GITHUB_WORKSPACE/kernel/msm-4.19/drivers/Makefile" || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> $GITHUB_WORKSPACE/kernel/msm-4.19/drivers/Makefile
+                grep -q "source \"drivers/kernelsu/Kconfig\"" "$GITHUB_WORKSPACE/kernel/msm-4.19/drivers/Kconfig" || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" "${GITHUB_WORKSPACE}/device_kernel/drivers/Kconfig"
                 echo "[+] KernelSU Settings done."
 
             elif [[ "${{ env.KERNELSU_METHOD }}" == "only" ]]; then
@@ -281,8 +283,8 @@ runs:
             elif [[ "${{ env.KERNELSU_METHOD }}" == "manual" ]]; then
                 git clone "${{ env.KERNELSU_SOURCE }}" -b "${{ env.KERNELSU_BRANCH }}" "$KERNELSU_FOLDER"
                 ln -sf "../$KERNELSU_FOLDER/kernel" "drivers/kernelsu"
-                grep -q "kernelsu" "$GITHUB_WORKSPACE/kernel/device_kernel/drivers/Makefile" || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> $GITHUB_WORKSPACE/kernel/device_kernel/drivers/Makefile
-                grep -q "source \"drivers/kernelsu/Kconfig\"" "$GITHUB_WORKSPACE/kernel/device_kernel/drivers/Kconfig" || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" "${GITHUB_WORKSPACE}/device_kernel/drivers/Kconfig"
+                grep -q "kernelsu" "$GITHUB_WORKSPACE/kernel/msm-4.19/drivers/Makefile" || printf "\nobj-\$(CONFIG_KSU) += kernelsu/\n" >> $GITHUB_WORKSPACE/kernel/msm-4.19/drivers/Makefile
+                grep -q "source \"drivers/kernelsu/Kconfig\"" "$GITHUB_WORKSPACE/kernel/msm-4.19/drivers/Kconfig" || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" "${GITHUB_WORKSPACE}/device_kernel/drivers/Kconfig"
                 echo "[+] KernelSU Settings done."
 
             elif [[ "${{ env.KERNELSU_METHOD }}" == "only" ]]; then
@@ -307,7 +309,7 @@ runs:
         if: env.KPM_ENABLE == 'true'
         shell: bash
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
 
           ENABLE_KPM_CONFIGS(){
             sed -n '/^config KALLSYMS_ALL/,/^[^ \t]/p' init/Kconfig | grep -q 'depends on.*DEBUG_KERNEL' && echo "CONFIG_DEBUG_KERNEL=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
@@ -376,9 +378,10 @@ runs:
           fi
 
       - name: Set KSU and SUSFS for DEFCONFIG
+        if: env.KERNELSU_ENABLE == 'true'
         shell: bash
         run: |
-          cd $GITHUB_WORKSPACE/kernel/device_kernel
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
 
           # Neccssary
           echo "CONFIG_KSU=y" >> ./arch/${{ env.KERNEL_ARCH }}/configs/${{ env.DEFCONFIG_NAME }}
