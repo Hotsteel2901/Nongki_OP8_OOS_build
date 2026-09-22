@@ -40,7 +40,7 @@ env:
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
-  KERNELSU_ENABLE : false
+  KERNELSU_ENABLE : true
 
   KERNELSU_SOURCE : ""
   KERNELSU_BRANCH : ""
@@ -49,7 +49,7 @@ env:
   KERNELSU_AUTO_GET : "true"
   KERNELSU_AUTO_FORK : "resukisu"
 
-  SUSFS_ENABLE : false
+  SUSFS_ENABLE : true
   SUSFS_FIXED : false
 
   AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
@@ -158,6 +158,75 @@ jobs:
           done
           echo "[+] OOS vendor/devicetree layout ready."
 
+      - name: 🔧 Fix OOS vendor include paths & missing devicetree
+        run: |
+          # OnePlus 官方 modules_and_devicetree 仓库里的 oplus charger 驱动用
+          # 4 层相对路径 include 内核头文件, 但按本 workflow 的目录布局
+          # (vendor 在 $GITHUB_WORKSPACE/vendor, 内核在 $GITHUB_WORKSPACE/kernel/msm-4.19)
+          # 从 charger_ic/ 到 kernel/msm-4.19/... 实际需要 5 层。
+          # 4 层会解析到 $GITHUB_WORKSPACE/vendor/kernel/msm-4.19 (不存在),
+          # 导致 oplus_battery_msm8250.c (OP8 实际编译的 charger 驱动) 编译失败。
+          # 详细推导见 Bin/fix_oos_vendor.py 的 docstring。
+          cd $GITHUB_WORKSPACE/vendor
+          python3 /tmp/Bin/fix_oos_vendor.py
+
+          # 19066 的 camera DTS 缺 kona-camera-sensor-rb5.dtsi, 但 19066/Makefile
+          # 会 include 它 -> dtc 直接失败。OnePlus 自己在别的机型目录里带了同一份
+          # 文件, 这里从 20801 复制补齐 (两份内容 byte-identical)。
+          SRC="$GITHUB_WORKSPACE/vendor/qcom/proprietary/devicetree-4.19/20801/camera/kona-camera-sensor-rb5.dtsi"
+          DST="$GITHUB_WORKSPACE/vendor/qcom/proprietary/devicetree-4.19/19066/camera/kona-camera-sensor-rb5.dtsi"
+          if [ -f "$DST" ]; then
+            echo "[+] 19066 kona-camera-sensor-rb5.dtsi already present."
+          elif [ -f "$SRC" ]; then
+            cp "$SRC" "$DST"
+            echo "[+] 19066 kona-camera-sensor-rb5.dtsi filled from 20801."
+          else
+            echo "[-] Neither source nor destination exists, 19066 dtb build will fail."
+            false
+          fi
+          echo "[+] OOS vendor fixes applied."
+
+      - name: 🔧 Fix OPLUS_FEATURE_* gates (export for kbuild sub-makes)
+        run: |
+          # oplus_native_features.mk 用普通赋值 (=) 设置 ~230 个 OPLUS_FEATURE_*,
+          # 但普通赋值不会进入环境, kbuild 递归到子目录时那些变量全是空,
+          # 于是子 Makefile 里的 $(OPLUS_FEATURE_*) 门控恒为假、被它们守护的
+          # 目标文件被静默丢弃。OplusKernelEnvConfig.mk 只为「编译器宏」做了
+          # 补偿 (-D...), 对 Makefile 里的 $(...) 门控无能为力。
+          #
+          # OP8 (kona-perf) 上会直接导致 vmlinux 链接失败:
+          #   drivers/scsi/ufs/  UFSPLUS 未导出 -> ufsfeature.o 不编译
+          #                      -> ufsf_* / recordUniproErr 等 ~20 个符号未定义
+          #   mm/                PROCESS_RECLAIM / MEMLEAK_DETECT 未导出
+          #                      -> process_mm_reclaim.o 与 mm/task_mem/ 不编译
+          #                      -> is_reclaim_should_cancel (vmscan.c:1231)
+          #                         与 update_user_tasklist (fork.c:2326) 未定义
+          #   net/, techpack/    -> oplus_router_boost/ 与 oplus_adfr.o 不编译
+          # 注意调用方都在编译 (它们的 CONFIG_* 前置条件均为 =y), 只有定义方被丢弃,
+          # 所以必须靠链接期报错才发现, 属于最隐蔽的一类构建缺陷。
+          # 推导详见 Bin/fix_oplus_feature_gates.py 的 docstring。
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
+          python3 /tmp/Bin/fix_oplus_feature_gates.py
+
+          # ReSukiSU 的 Kconfig/Makefile 注册点。
+          # 注意 build-ready 的 manual 分支里 sed 目标写的是改名前的
+          # ${GITHUB_WORKSPACE}/device_kernel/drivers/Kconfig, 该路径已不存在,
+          # 那条分支实际会静默失败。本仓库 KERNELSU_METHOD=shell 走 ReSukiSU
+          # setup.sh, 但为不让门控依赖上游脚本行为, 这里做一次幂等兜底。
+          if ! grep -q 'source "drivers/kernelsu/Kconfig"' drivers/Kconfig; then
+            sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+            echo "[+] drivers/Kconfig: kernelsu Kconfig registered."
+          else
+            echo "[+] drivers/Kconfig: kernelsu Kconfig already registered."
+          fi
+          if ! grep -q 'obj-$(CONFIG_KSU) += kernelsu/' drivers/Makefile; then
+            printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> drivers/Makefile
+            echo "[+] drivers/Makefile: kernelsu registered."
+          else
+            echo "[+] drivers/Makefile: kernelsu already registered."
+          fi
+          echo "[+] OPLUS_FEATURE_* gates exported."
+
       - name: 📌 Kernel version suffix (OOS)
         run: |
           cd $GITHUB_WORKSPACE/kernel/msm-4.19
@@ -171,15 +240,54 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel/msm-4.19/
           cp /tmp/Patches/Patch/susfs_resukisu_oos_4.19.patch ./
-          patch -p1 < susfs_resukisu_oos_4.19.patch || true
+          # 不能用 `|| true`: 静默吞掉失败会让内核带着半套 SUSFS 继续编译,
+          # 最终以 vmlinux undefined reference 或运行期异常的形式暴露, 极难定位。
+          # 补丁必须干净应用, 否则立刻失败。
+          patch -p1 --no-backup-if-mismatch < susfs_resukisu_oos_4.19.patch
+          if find . -name '*.rej' -o -name '*.orig' | grep -q .; then
+            echo "[-] Patch left .rej/.orig files:"
+            find . -name '*.rej' -o -name '*.orig'
+            false
+          fi
           rm -f susfs_resukisu_oos_4.19.patch
-          echo "[+] OOS SUSFS + ReSukiSU patched."
+
+          # 断言关键修复真的落到文件里, 防止补丁静默降级
+          fail=0
+          check() {
+            if grep -q "$2" "$1"; then
+              echo "[+] $1 : $2"
+            else
+              echo "[-] $1 : '$2' NOT FOUND"
+              fail=1
+            fi
+          }
+          check include/linux/susfs_def.h 'TIF_PROC_NO_SU 34'
+          check include/linux/susfs_def.h 'susfs_is_current_proc_no_su'
+          check include/linux/susfs_def.h 'TIF_PROC_UMOUNTED_FOR_ZYGOTE_NEXT 35'
+          check fs/stat.c 'ksu_handle_vfs_fstat'
+          check fs/stat.c 'struct filename \*\*filename, int \*flags'
+          check fs/open.c 'struct filename \*\*filename, int \*mode'
+          check fs/namei.c '^int filename_lookup'
+          check fs/exec.c 'susfs_is_current_proc_no_su'
+          check include/linux/namei.h 'extern int filename_lookup'
+          if [ "$fail" != "0" ]; then
+            echo "[-] SUSFS/ReSukiSU patch did not apply as expected."
+            false
+          fi
+          echo "[+] OOS SUSFS + ReSukiSU patched and verified."
 
       - name: 💿 Patch Kernel of Droidspaces (OOS)
         run: |
           cd $GITHUB_WORKSPACE/kernel/msm-4.19/
           cp /tmp/Patches/Droidspaces/oos_droidspaces.patch ./
-          patch -p1 < oos_droidspaces.patch || true
+          # 同 SUSFS: 不用 `|| true`, 否则补丁失败会以「DroidSpaces 已启用」的假象继续,
+          # 但内核里其实没有对应改动, 运行期缺 /dev 或 cgroup 行为异常。
+          patch -p1 --no-backup-if-mismatch < oos_droidspaces.patch
+          if find . -name '*.rej' | grep -q .; then
+            echo "[-] DroidSpaces patch left .rej files:"
+            find . -name '*.rej'
+            false
+          fi
           rm -f oos_droidspaces.patch
           echo "[+] Patched DroidSpaces for OOS successfully."
 
@@ -193,8 +301,23 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/kernel/msm-4.19/
           cp /tmp/Patches/Patch/defconfig_oos.patch ./
-          patch -p1 < defconfig_oos.patch || true
+          # 这条补丁决定 CONFIG_KSU / CONFIG_KSU_SUSFS / CONFIG_BUILD_ARM64_DT_OVERLAY
+          # 等关键开关, 静默失败会让整轮 root+SUSFS 工作白做, 必须硬失败。
+          patch -p1 --no-backup-if-mismatch < defconfig_oos.patch
+          if find . -name '*.rej' | grep -q .; then
+            echo "[-] defconfig patch left .rej files:"
+            find . -name '*.rej'
+            false
+          fi
           rm -f defconfig_oos.patch
+          for opt in CONFIG_KSU=y CONFIG_KSU_SUSFS=y CONFIG_BUILD_ARM64_DT_OVERLAY=y; do
+            if grep -q "^$opt$" arch/arm64/configs/vendor/kona-perf_defconfig; then
+              echo "[+] defconfig: $opt"
+            else
+              echo "[-] defconfig: $opt missing after patch."
+              false
+            fi
+          done
           echo "[+] OOS defconfig applied."
 
       - name: "[1⁺] Apply OnePlus native features"
@@ -225,8 +348,27 @@ jobs:
             echo "[+] Generated dtb.img from kona-mtp.dtb"
           else
             # 回退: 拼接 vendor 下所有 dtb (与 OnePlus 官方 AndroidKernel.mk 一致)
-            cat out/arch/arm64/boot/dts/vendor/*/*.dtb > out/arch/arm64/boot/dtb.img
-            echo "[+] Generated dtb.img (concat all vendor dtbs)"
+            # 注意必须让 glob 显式失败时中止: 若该批 .dtb 全不存在, `cat` 会写一个
+            # 0 字节的 dtb.img 并返回 0, 后续打包照常完成 -> 刷机后才发现在 boot 阶段炸。
+            shopt -s nullglob
+            dtbs=(out/arch/arm64/boot/dts/vendor/*/*.dtb)
+            shopt -u nullglob
+            if [ ${#dtbs[@]} -eq 0 ]; then
+              echo "[-] No vendor .dtb files found; DTB generation would produce an empty image."
+              false
+            fi
+            cat "${dtbs[@]}" > out/arch/arm64/boot/dtb.img
+            echo "[+] Generated dtb.img (concat ${#dtbs[@]} vendor dtbs)"
+          fi
+
+          # dtb.img 走 concat 路径时应以 FDT magic d00dfeed 开头 (raw DTB 拼接);
+          # dtbo.img 才是 Android dt_table, magic 是 d7b7ab1e。两者常被搞混。
+          magic=$(od -An -tx1 -N4 out/arch/arm64/boot/dtb.img | tr -d ' ')
+          size=$(stat -c %s out/arch/arm64/boot/dtb.img)
+          echo "[+] dtb.img: ${size} bytes, magic=${magic}"
+          if [ "$magic" != "d00dfeed" ]; then
+            echo "[-] dtb.img magic is ${magic}, expected d00dfeed (raw FDT)."
+            false
           fi
 
       - name: 🔩 Pack Process
