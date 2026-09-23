@@ -268,7 +268,6 @@ runs:
                 rm -rf /usr/bin/python
                 ln -s /usr/bin/python2.7 /usr/bin/python
                 echo "[+] Python version: $(python -V)"
-                false
 
             else
                 echo "[-] You need choose a vaild python version!"
@@ -300,7 +299,7 @@ runs:
             echo "::endgroup::"
             echo "[+] Get GNU GCC successfully."
 
-          elif [ "${{ env.SYSTEM_VERSION }}" == "arch" }} ]; then
+          elif [ "${{ env.SYSTEM_VERSION }}" == "arch" ]; then
             echo "::group::[+] Starting install GNU GCC..."
             pacman -S aarch64-linux-gnu-binutils aarch64-linux-gnu-gcc aarch64-linux-gnu-linux-api-headers aarch64-linux-gnu-glibc --noconfirm
             pacman -S arm-linux-gnueabihf-binutils arm-linux-gnueabihf-gcc arm-linux-gnueabihf-linux-api-headers arm-linux-gnueabihf-glibc --noconfirm

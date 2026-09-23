@@ -118,7 +118,7 @@ env:
 jobs:
   build-kernel:
     name: Oneplus 8 (OxygenOS 13.1 A13) (ReSukiSU+SUSFS Kernel)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
