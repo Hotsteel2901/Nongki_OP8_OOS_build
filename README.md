@@ -39,7 +39,7 @@ The OnePlus OSS kernel (`OnePlusOSS/android_kernel_oneplus_sm8250`, branch `onep
 
 | File | Content | Applied by |
 |---|---|---|
-| `Patch/susfs_resukisu_oos_4.19.patch` | SUSFS v2.2.0 (4.19.157) + ReSukiSU inline hooks (all 7 required) | workflow step |
+| `Patch/susfs_resukisu_oos_4.19.patch` | SUSFS v2.2.0 (4.19.157) + ReSukiSU inline hooks (7 hooks) | workflow step |
 | `Patch/defconfig_oos.patch` | KSU/SUSFS/BBG/DroidSpaces Non-GKI configs | workflow step |
 | `Droidspaces/oos_droidspaces.patch` | cgroup prefix + xt_qtaguid panic fix | workflow step |
 | Baseband Guard | fetched at build time via `setup.sh` (non-GKI path) | workflow step |
@@ -65,13 +65,9 @@ The OOS patch is based on **JackA1ltman's generic 4.19 patch** which targets the
 - `fs/notify/fdinfo.c`: OOS already had partial SUSFS signatures (3-arg show_fdinfo) → hunk#4 body fixed manually
 - `drivers/input/input.c`: OOS has `OPLUS_FEATURE_SAUPWK` block → input hook placed accordingly
 - `fs/read_write.c`: OOS has `OPLUS_FEATURE_IOMONITOR` block → sys_read hook adapted
-- `fs/stat.c`: `ksu_handle_stat` + `ksu_handle_vfs_fstat` wired manually against OOS's
-  `vfs_statx`/`vfs_fstatat` layout (both call sites carry `OPLUS_FEATURE_*` neighbours)
-- `fs/namei.c` + `include/linux/namei.h`: OOS's `filename_lookup` is `static`, so it is
-  de-static'd and declared in the header — ReSukiSU's `struct filename **` signatures need it
-- `fs/exec.c`: `susfs_is_current_proc_no_su()` guard for the execveat hook
+- `fs/stat.c`: `ksu_handle_stat` added manually (SUSFS patch doesn't include it for OOS)
 
-## Key settings (build-oneplus-8-oos13.1.yml)
+## Key settings (build-oneplus-8-los23-a16.yml)
 
 - `KERNEL_SOURCE/Branch`: OnePlus OSS repo, `oneplus/sm8250_t_13.1_op8`
 - `VENDOR_SOURCE/Branch`: `android_kernel_modules_and_devicetree_oneplus_sm8250`, `oneplus/sm8250_t_13.1_op8`
@@ -82,36 +78,9 @@ The OOS patch is based on **JackA1ltman's generic 4.19 patch** which targets the
 ## OOS vendor/devicetree layout
 
 OnePlus official builds place the kernel so `arch/arm64/boot/dts/../../../../../../vendor` resolves.
-In this workflow the kernel sits at `$GITHUB_WORKSPACE/kernel/msm-4.19`, so the 6-level-up target is
-`$GITHUB_WORKSPACE/vendor`. `build-ready` clones the modules_and_devicetree repo, moves its `vendor/`
-there, copies its `kernel/msm-4.19/techpack/{camera,display,video}` over the kernel's empty gitlinks,
-then verifies the critical symlinks resolve.
-
-Two layout-dependent fixups run before the build:
-
-- **charger include depth** (`Bin/fix_oos_vendor.py`) — the shipped oplus charger drivers include
-  kernel headers with four `../`. From `vendor/oplus/kernel/charger/charger_ic/` to the kernel at
-  `$GITHUB_WORKSPACE/kernel/msm-4.19` the real distance is five, so four resolves to a
-  non-existent `$GITHUB_WORKSPACE/vendor/kernel/msm-4.19` and `oplus_battery_msm8250.c`
-  (the driver OP8 actually builds) fails to compile.
-- **OPLUS_FEATURE_* gates** (`Bin/fix_oplus_feature_gates.py`) — the top Makefile `-include`s
-  `oplus_native_features.mk`, which sets ~230 `OPLUS_FEATURE_*` with plain assignments. Plain
-  assignments do not reach kbuild's per-directory sub-makes, so every `$(OPLUS_FEATURE_*)` gate in
-  a sub-Makefile evaluated false. `OplusKernelEnvConfig.mk` only compensates for *compiler macros*
-  (`-D...`), so `#ifdef` worked in C while Makefile gates silently dropped their objects. The
-  script appends one `export` line per required gate to `oplus_native_features.mk` itself, so the
-  assignment and the export can never drift apart.
-
-  On OP8 this was a hard link failure, because the *callers* compiled in (their `CONFIG_*`
-  prerequisites are `=y`) while the *definitions* were dropped:
-
-  | Dropped object | Undefined symbols | Called from |
-  |---|---|---|
-  | `drivers/scsi/ufs/ufsfeature.o` | `ufsf_*` (~20), `recordUniproErr`, `io_latency_hist_show` | `ufshcd.c`, `ufs-sysfs.c` |
-  | `mm/process_mm_reclaim.o` | `is_reclaim_should_cancel` | `mm/vmscan.c:1231` |
-  | `mm/task_mem/` | `update_user_tasklist` | `kernel/fork.c:2326` |
-  | `net/oplus_router_boost/` | — (silent feature loss) | — |
-  | `techpack/display/oplus/oplus_adfr.o` | — (silent feature loss) | — |
+In this workflow `device_kernel` sits at `$GITHUB_WORKSPACE/device_kernel`, so the 6-level-up target is
+`$GITHUB_WORKSPACE/vendor`. `build-ready` clones the modules_and_devicetree repo and moves its `vendor/`
+there, then verifies the critical symlinks resolve.
 
 ## Credits
 
