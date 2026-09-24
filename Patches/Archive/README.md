@@ -6,6 +6,7 @@ Base commit: `1d2678a3548f4825447f17b25a5cc1754c4cd1ae`
 (Synchronize code for OnePlus IN2013_13.1.0.593(EX01) ... QCOM release TAG:AU_LINUX_ANDROID_LA.UM.9.12.1.R1.11.00.00.893.009)
 Kernel source: `~/android_kernel_oneplus_sm8250` (local)
 Archive generated: 2026-08-20
+Archive re-synced: 2026-09-24 (live patches on `test01`; see "Post-archive updates" below)
 
 > This is the **continue-from-here** handoff record. Read the whole README before resuming.
 > The live patches actually used by the workflow are under `../Patch/` and `../Droidspaces/`;
@@ -183,6 +184,24 @@ NO `CONFIG_REKERNEL` (Re:Kernel dropped).
         KCFLAGS="-Wno-strict-prototypes ... -Wno-implicit-int ..." O=out ARCH=arm64 \
         vendor/kona-perf_defconfig  then  make -j2 ...
 ```
+
+---
+
+## Post-archive updates (2026-09-24, branch `test01`)
+
+Live patches re-synced into this archive after the SUSFS rework on `test01` (`c9cca39`,
+on top of the reverted `76ecdbf`). `0000-full-all-changes.patch` is regenerated as
+`susfs + droidspaces + defconfig` and stays byte-equal to the three `0001-*` mirrors
+concatenated in that order.
+
+- `susfs_resukisu_oos_4.19.patch`: inline hooks moved to the `struct filename **` ABI
+  ReSukiSU uses when `CONFIG_KSU_SUSFS` is on (`ksu_handle_stat` / `ksu_handle_faccessat`,
+  both signatures guarded by `CONFIG_KSU_SUSFS` so they cannot coexist); `filename_lookup()`
+  de-static'd and declared in `include/linux/namei.h`; `ksu_handle_vfs_fstat` hook added in
+  `vfs_statx_fd()`; `TIF_PROC_NO_SU` / `TIF_PROC_UMOUNTED_FOR_ZYGOTE_NEXT` and the
+  `susfs_*_no_su` inlines added to `susfs_def.h`.
+- `defconfig_oos.patch`: `CONFIG_WB_KERNEL_LOG=y` parked (config only — upstream
+  `misc/Makefile`'s `obj-$(CONFIG_WB_KERNEL_LOG)` line stays commented out, so it is inert).
 
 ---
 

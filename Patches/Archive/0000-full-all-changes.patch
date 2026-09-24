@@ -399,7 +399,7 @@ index 6e83cd85..ac9ddf3f 100644
  		path.dentry = lookup_slow(&nd->last, nd->path.dentry,
  					  nd->flags);
  		if (IS_ERR(path.dentry))
-@@ -2180,6 +2290,17 @@ static int link_path_walk(const char *name, struct nameidata *nd)
+@@ -2180,6 +2285,17 @@ static int link_path_walk(const char *name, struct nameidata *nd)
  		if (err)
  			return err;
  
@@ -427,6 +427,21 @@ index 6e83cd85..ac9ddf3f 100644
  
  	nd->flags &= ~LOOKUP_PARENT;
  	return walk_component(nd, 0);
+@@ -2427,9 +2437,12 @@ static int filename_lookup(int dfd, struct filename *name, unsigned flags,
+ 	terminate_walk(nd);
+ 	return err;
+ }
+ 
+-static int filename_lookup(int dfd, struct filename *name, unsigned flags,
+-			   struct path *path, struct path *root)
++/* 4.19.157 上游此函数为 static，但 SUSFS/ReSukiSU 的 ksu_handle_stat 与
++ * ksu_handle_faccessat 需要在 fs/stat.c、fs/open.c 里以 struct filename *
++ * 直接走查找流程（新版 SUSFS 契约），故放宽为外部可见（同步内核主线改动）。 */
++int filename_lookup(int dfd, struct filename *name, unsigned flags,
++		    struct path *path, struct path *root)
+ {
+ 	int retval;
+ 	struct nameidata nd;
 @@ -3254,15 +3378,39 @@ static int lookup_open(struct nameidata *nd, struct path *path,
  	int error, create_error = 0;
  	umode_t mode = op->mode;
@@ -645,6 +660,21 @@ index 6e83cd85..ac9ddf3f 100644
  	res = readlink_copy(buffer, buflen, link);
  	do_delayed_call(&done);
  	return res;
+diff --git a/include/linux/namei.h b/include/linux/namei.h
+index 3d5c0b1c..4a2ff0c9 100644
+--- a/include/linux/namei.h
++++ b/include/linux/namei.h
+@@ -49,6 +49,10 @@
+ 
+ extern int path_pts(struct path *path);
+ 
++struct filename;
++extern int filename_lookup(int dfd, struct filename *name, unsigned flags,
++			   struct path *path, struct path *root);
++
+ extern int user_path_at_empty(int, const char __user *, unsigned, struct path *, int *empty);
+ 
+ static inline int user_path_at(int dfd, const char __user *name, unsigned flags,
 diff --git a/fs/namespace.c b/fs/namespace.c
 index 52af9039..2f344694 100755
 --- a/fs/namespace.c
@@ -1069,42 +1099,64 @@ index b14aef04..156bab94 100644
  #include "internal.h"
  
  int do_truncate2(struct vfsmount *mnt, struct dentry *dentry, loff_t length,
-@@ -347,7 +351,15 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
+@@ -347,7 +351,23 @@ SYSCALL_DEFINE4(fallocate, int, fd, int, mode, loff_t, offset, loff_t, len)
  {
  	return ksys_fallocate(fd, mode, offset, len);
  }
 -
-+#ifdef CONFIG_KSU
-+__attribute__((hot)) 
-+extern int ksu_handle_faccessat(int *dfd, const char __user **filename_user,
-+				int *mode, int *flags);
-+#endif
 +#ifdef CONFIG_KSU_SUSFS
 +extern struct static_key_true ksu_su_compat_enabled;
 +extern bool __ksu_is_allow_uid_for_current(uid_t uid);
++/* CONFIG_KSU_SUSFS 打开时 ReSukiSU 使用 struct filename ** 新签名
++ * (KernelSU/kernel/feature/sucompat.h) 并直接读写 (*filename)->name，
++ * 故必须传入 struct filename *，不能再传 const char __user *。
++ * 注意：开启 SUSFS 时不能再声明旧签名，否则两者类型冲突，编译期报
++ * conflicting types for 'ksu_handle_faccessat'。 */
++extern int ksu_handle_faccessat(int *dfd, struct filename **filename,
++				int *mode, int *flags);
++#else
++#ifdef CONFIG_KSU
++extern __attribute__((hot)) int ksu_handle_faccessat(int *dfd,
++				const char __user **filename_user,
++				int *mode, int *flags);
++#endif
 +#endif
  /*
   * access() needs to use the real uid/gid, not the effective uid/gid.
   * We do this by temporarily clearing all FS-related capabilities and
-@@ -363,6 +375,18 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
+@@ -356,6 +368,9 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
+ 	struct vfsmount *mnt;
  	int res;
  	unsigned int lookup_flags = LOOKUP_FOLLOW;
- 
-+	#ifdef CONFIG_KSU_SUSFS
-+    if (likely(susfs_is_current_proc_umounted()) || !static_branch_unlikely(&ksu_su_compat_enabled)) {
-+        goto orig_flow;
-+    }
-+
-+    if (unlikely(__ksu_is_allow_uid_for_current(current_uid().val))) {
-+        ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
-+    }
-+orig_flow:
-+#elif defined(CONFIG_KSU)
-+    ksu_handle_faccessat(&dfd, &filename, &mode, NULL);
++#ifdef CONFIG_KSU_SUSFS
++	struct filename *fname = NULL;
 +#endif
+ 
  	if (mode & ~S_IRWXO)	/* where's F_OK, X_OK, W_OK, R_OK? */
  		return -EINVAL;
+@@ -375,6 +390,22 @@ long do_faccessat(int dfd, const char __user *filename, int mode)
  
+ 	old_cred = override_creds(override_cred);
+ retry:
++#ifdef CONFIG_KSU_SUSFS
++	fname = getname_flags(filename, lookup_flags, NULL);
++
++	if (likely(susfs_is_current_proc_no_su()))
++		goto orig_flow;
++
++	if (static_branch_likely(&ksu_su_compat_enabled)) {
++		if (unlikely(__ksu_is_allow_uid_for_current(current_uid().val)))
++			ksu_handle_faccessat(&dfd, &fname, &mode, NULL);
++	}
++
++orig_flow:
++	res = filename_lookup(dfd, fname, lookup_flags, &path, NULL);
++	/* no putname(fname) here as filename_lookup() has it done for us already */
++#else
+ 	res = user_path_at(dfd, filename, lookup_flags, &path);
++#endif
+ 	if (res)
+ 		goto out;
 diff --git a/fs/proc/base.c b/fs/proc/base.c
 index c5e97e16..91117a75 100755
 --- a/fs/proc/base.c
@@ -2095,10 +2147,23 @@ diff --git a/fs/stat.c b/fs/stat.c
 index f8e6fb2c..00913964 100644
 --- a/fs/stat.c
 +++ b/fs/stat.c
-@@ -21,6 +21,10 @@
+@@ -21,6 +21,23 @@
  #include <linux/uaccess.h>
  #include <asm/unistd.h>
  
++#ifdef CONFIG_KSU_SUSFS
++#include <linux/susfs_def.h>
++/* vfs_statx_fd() 与 vfs_statx() 都会用到，声明必须放在两者之前。 */
++extern struct static_key_true ksu_is_init_rc_hook_enabled;
++extern struct static_key_true ksu_su_compat_enabled;
++extern bool __ksu_is_allow_uid_for_current(uid_t uid);
++extern void ksu_handle_vfs_fstat(int fd, loff_t *kstat_size_ptr);
++/* CONFIG_KSU_SUSFS 打开时 ReSukiSU 使用 struct filename ** 新签名
++ * (KernelSU/kernel/feature/sucompat.h) 并直接解引用 (*filename)->name，
++ * 故必须传入 struct filename *，不能再传 const char __user *。 */
++extern int ksu_handle_stat(int *dfd, struct filename **filename, int *flags);
++#endif
++
 +#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 +extern void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat);
 +#endif
@@ -2106,7 +2171,7 @@ index f8e6fb2c..00913964 100644
  /**
   * generic_fillattr - Fill in the basic attributes from the inode struct
   * @inode: Inode to use as the source
-@@ -45,6 +49,9 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
+@@ -45,6 +56,9 @@ void generic_fillattr(struct inode *inode, struct kstat *stat)
  	stat->ctime = inode->i_ctime;
  	stat->blksize = i_blocksize(inode);
  	stat->blocks = inode->i_blocks;
@@ -2116,7 +2181,7 @@ index f8e6fb2c..00913964 100644
  
  	if (IS_NOATIME(inode))
  		stat->result_mask &= ~STATX_ATIME;
-@@ -76,8 +83,18 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
+@@ -76,8 +90,18 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
  	request_mask &= STATX_ALL;
  	query_flags &= KSTAT_QUERY_FLAGS;
  	if (inode->i_op->getattr)
@@ -2135,28 +2200,68 @@ index f8e6fb2c..00913964 100644
  
  	generic_fillattr(inode, stat);
  	return 0;
-@@ -354,12 +371,21 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
- 	return cp_new_stat(&stat, statbuf);
- }
- 
-+#ifdef CONFIG_KSU
-+__attribute__((hot)) 
-+extern int ksu_handle_stat(int *dfd, const char __user **filename_user,
-+			int *flags);
+@@ -141,7 +154,11 @@ int vfs_statx_fd(unsigned int fd, struct kstat *stat,
+ 	f = fdget_raw(fd);
+ 	if (f.file) {
+ 		error = vfs_getattr(&f.file->f_path, stat,
+ 				    request_mask, query_flags);
++#ifdef CONFIG_KSU_SUSFS
++		if (static_branch_unlikely(&ksu_is_init_rc_hook_enabled))
++			ksu_handle_vfs_fstat(fd, &stat->size);
 +#endif
+ 		fdput(f);
+ 	}
+ 	return error;
+@@ -169,30 +182,49 @@ int vfs_statx(int dfd, const char __user *filename, int flags,
+ 	struct path path;
+ 	int error = -EINVAL;
+ 	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
++#ifdef CONFIG_KSU_SUSFS
++	struct filename *fname = NULL;
++#endif
+ 
+ 	if ((flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
+ 		       AT_EMPTY_PATH | KSTAT_QUERY_FLAGS)) != 0)
+ 		return -EINVAL;
+ 
+ 	if (flags & AT_SYMLINK_NOFOLLOW)
+ 		lookup_flags &= ~LOOKUP_FOLLOW;
+ 	if (flags & AT_NO_AUTOMOUNT)
+ 		lookup_flags &= ~LOOKUP_AUTOMOUNT;
+ 	if (flags & AT_EMPTY_PATH)
+ 		lookup_flags |= LOOKUP_EMPTY;
+ 
+ retry:
++#ifdef CONFIG_KSU_SUSFS
++	fname = getname_flags(filename, lookup_flags, NULL);
 +
- #if !defined(__ARCH_WANT_STAT64) || defined(__ARCH_WANT_SYS_NEWFSTATAT)
- SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
- 		struct stat __user *, statbuf, int, flag)
- {
- 	struct kstat stat;
- 	int error;
-+#ifdef CONFIG_KSU
-+	ksu_handle_stat(&dfd, &filename, &flag);
++	if (likely(susfs_is_current_proc_no_su()))
++		goto orig_flow;
++
++	if (static_branch_likely(&ksu_su_compat_enabled)) {
++		if (unlikely(__ksu_is_allow_uid_for_current(current_uid().val)))
++			ksu_handle_stat(&dfd, &fname, &flags);
++	}
++
++orig_flow:
++	error = filename_lookup(dfd, fname, lookup_flags, &path, NULL);
++	/* no putname(fname) here as filename_lookup() has it done for us already */
++#else
+ 	error = user_path_at(dfd, filename, lookup_flags, &path);
 +#endif
- 
- 	error = vfs_fstatat(dfd, filename, &stat, flag);
  	if (error)
+ 		goto out;
+ 
+ 	error = vfs_getattr(&path, stat, request_mask, flags);
+ 	path_put(&path);
+ 	if (retry_estale(error, lookup_flags)) {
+ 		lookup_flags |= LOOKUP_REVAL;
+ 		goto retry;
+ 	}
+ out:
+ 	return error;
+ }
+ EXPORT_SYMBOL(vfs_statx);
 diff --git a/fs/statfs.c b/fs/statfs.c
 index 56f655f7..375a079b 100644
 --- a/fs/statfs.c
@@ -3972,7 +4077,7 @@ new file mode 100644
 index 00000000..fb50e74d
 --- /dev/null
 +++ b/include/linux/susfs_def.h
-@@ -0,0 +1,180 @@
+@@ -0,0 +1,213 @@
 +#ifndef KSU_SUSFS_DEF_H
 +#define KSU_SUSFS_DEF_H
 +
@@ -4045,6 +4150,8 @@ index 00000000..fb50e74d
 + */
 + // thread_info->flags is unsigned long :D
 +#define TIF_PROC_UMOUNTED 33
++#define TIF_PROC_NO_SU 34
++#define TIF_PROC_UMOUNTED_FOR_ZYGOTE_NEXT 35
 +
 +#define AS_FLAGS_SUS_PATH 33
 +#define AS_FLAGS_SUS_MOUNT 34
@@ -4128,6 +4235,37 @@ index 00000000..fb50e74d
 +
 +static inline void susfs_set_current_proc_umounted(void) {
 +	set_thread_flag(TIF_PROC_UMOUNTED);
++}
++
++static inline void susfs_clear_current_proc_umounted(void) {
++	clear_thread_flag(TIF_PROC_UMOUNTED);
++}
++
++static inline bool susfs_is_current_proc_umounted_for_zygote_next(void) {
++	return (likely(test_thread_flag(TIF_PROC_UMOUNTED_FOR_ZYGOTE_NEXT)));
++}
++
++static inline void susfs_set_current_proc_umounted_for_zygote_next(void) {
++	set_thread_flag(TIF_PROC_UMOUNTED_FOR_ZYGOTE_NEXT);
++}
++
++static inline void susfs_clear_current_proc_umounted_for_zygote_next(void) {
++	clear_thread_flag(TIF_PROC_UMOUNTED_FOR_ZYGOTE_NEXT);
++}
++
++/* ReSukiSU 新版 SUSFS 集成（setuid_hook.c 与 sucompat.h）依赖以下 no_su 系列。
++ * 这些标志位与内联函数在旧版 SUSFS 补丁中不存在，必须补齐，否则
++ * ksu_handle_* hook 会因找不到 TIF_PROC_NO_SU 而编译失败。 */
++static inline bool susfs_is_current_proc_no_su(void) {
++	return (likely(test_thread_flag(TIF_PROC_NO_SU)));
++}
++
++static inline void susfs_set_current_proc_no_su(void) {
++	set_thread_flag(TIF_PROC_NO_SU);
++}
++
++static inline void susfs_clear_current_proc_no_su(void) {
++	clear_thread_flag(TIF_PROC_NO_SU);
 +}
 +
 +static inline bool susfs_is_current_proc_umounted_app(void) {
@@ -4414,7 +4552,14 @@ diff --git a/arch/arm64/configs/vendor/kona-perf_defconfig b/arch/arm64/configs/
 index 5b64d899..833f0aff 100755
 --- a/arch/arm64/configs/vendor/kona-perf_defconfig
 +++ b/arch/arm64/configs/vendor/kona-perf_defconfig
-@@ -1,3 +1,29 @@
+@@ -1,3 +1,36 @@
++# Devicetree overlay (fixes 19821/Makefile's CONFIG_ARCH_LITO typo in its non-overlay
++# branch — with this on, the correct dtbo-$(CONFIG_ARCH_KONA) branch is used instead,
++# matching luk1337 and LineageOS's own kona-perf_defconfig)
++CONFIG_BUILD_ARM64_DT_OVERLAY=y
++# Oplus Phoenix write-back kernel log (config only; not wired into a build
++# rule yet — parked until we have a successful boot to build on)
++CONFIG_WB_KERNEL_LOG=y
 +# ReSukiSU + SUSFS (OOS 4.19.157)
 +CONFIG_KSU=y
 +CONFIG_KSU_SUSFS=y
