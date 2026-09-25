@@ -208,6 +208,9 @@ concatenated in that order.
   kbuild glue lines (as in luk1337's lineage-19.1 tree); `defconfig_oos.patch` sets
   `CONFIG_QCA_CLD_WLAN=m`. Modules are packed by `PACK_KMODULES` as
   `qca_cld3_wlan.ko` (the name OOS uses for the WiFi module) inside the AnyKernel3 zip.
+  `CONFIG_MODULE_SIG_FORCE` is flipped off (second hunk of the defconfig patch) — stock
+  has it on, and since we cannot sign with OnePlus's key the module would be rejected
+  at load time; this also unblocks the stock ROM's own modules against our kernel.
 
 ---
 
