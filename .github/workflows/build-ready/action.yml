@@ -44,70 +44,23 @@ runs:
             git clone --depth=1 "${{ env.VENDOR_SOURCE }}" -b "${{ env.VENDOR_BRANCH }}" oos_vendor_tmp
             # 1) vendor -> $GITHUB_WORKSPACE/vendor (内核 vendor symlink 6层上级)
             mv oos_vendor_tmp/vendor ./vendor
-            # 2) techpack -> 填充 OOS 官方内核的空 gitlink
-            for d in camera display video; do
-              if [ -d "oos_vendor_tmp/kernel/msm-4.19/techpack/$d" ]; then
-                rm -rf kernel/msm-4.19/techpack/$d
-                cp -r oos_vendor_tmp/kernel/msm-4.19/techpack/$d kernel/msm-4.19/techpack/$d
-                echo "[+] techpack/$d filled from modules_and_devicetree."
-              else
-                echo "[-] techpack/$d not found in modules_and_devicetree."
-                false
-              fi
-            done
-            # 3) vendor/qcom/opensource/wlan/* -> kernel/msm-4.19/drivers/staging/*
-            #    OnePlus 官方 manifest 用 linkfile 做同样的映射 (参考 fatalcoder524/OP9_KSUN_SUSFS
-            #    的 manifest.xml, 4 条 linkfile 与本目录一一对应)。不建这层映射, qcacld-3.0 /
-            #    qca-wifi-host-cmn / fw-api 这些 WiFi 源码根本不在源码树里。
-            #    注意: drivers/staging/{Makefile,Kconfig} 里没有这些目录的 glue, 所以本步只是把
-            #    源码就位 (纯 kbuild 下 qcacld 是 Android.mk 离树模块, 还要 glue+CONFIG+打包才产出),
-            #    不会改变当前编译产物。
-            WLAN_DIR="vendor/qcom/opensource/wlan"
-            for d in fw-api qcacld-3.0 qca-wifi-host-cmn utils; do
-              if [ ! -d "$WLAN_DIR/$d" ]; then
-                echo "[-] $WLAN_DIR/$d not found in modules_and_devicetree."
-                false
-                continue
-              fi
-              ln -sfn "../../../../$WLAN_DIR/$d" "kernel/msm-4.19/drivers/staging/$d"
-              echo "[+] drivers/staging/$d -> $(readlink kernel/msm-4.19/drivers/staging/$d)"
-            done
-            # 4) drivers/staging glue: 让 qcacld-3.0 进入 kbuild (与 luk1337 lineage-19.1
-            #    的两行一致)。qcacld 自带 KERNEL_BUILD 分支: 内核内构建时 MODNAME=wlan,
-            #    并从 ../qca-wifi-host-cmn、../fw-api 取源码, 正好是 3) 建立的链接布局。
-            STAGING_MK="kernel/msm-4.19/drivers/staging/Makefile"
-            STAGING_KCONF="kernel/msm-4.19/drivers/staging/Kconfig"
-            grep -q "CONFIG_QCA_CLD_WLAN" "$STAGING_MK" || printf "\nobj-\$(CONFIG_QCA_CLD_WLAN)\t+= qcacld-3.0/\n" >> "$STAGING_MK"
-            grep -q "drivers/staging/qcacld-3.0/Kconfig" "$STAGING_KCONF" || sed -i "/endif # STAGING/i\source \"drivers/staging/qcacld-3.0/Kconfig\"" "$STAGING_KCONF"
-            echo "[+] drivers/staging glue ready: $(grep -c 'CONFIG_QCA_CLD_WLAN' "$STAGING_MK") obj line(s), $(grep -c 'qcacld-3.0/Kconfig' "$STAGING_KCONF") source line(s)."
+            # 2) 除 vendor/ 以外的映射全部由一个声明式文件描述: Drivers/manifest.xml
+            #    (techpack camera/display/video 填充空 gitlink, WLAN 源码 -> drivers/staging +
+            #    kbuild glue, audio-kernel/data-kernel 的位置与来源; 主源缺失时自动回退到
+            #    luk1337/android_kernel_oneplus_sm8250 的 lineage-19.1 源码树)。
+            #    执行器 Drivers/apply.py 只用 python3 标准库, 逐条链接/复制并校验落点。
+            python3 Drivers/apply.py --manifest Drivers/manifest.xml --workspace "$GITHUB_WORKSPACE"
             rm -rf oos_vendor_tmp
-            echo "[+] OOS vendor + techpack cloned."
+            echo "[+] OOS vendor + techpack + driver map applied."
           else
             echo "[-] VENDOR_SOURCE not set."
             false
           fi
 
-          # 验证 techpack 子目录有 Makefile (可编译)
-          for d in camera display video; do
-            if [ -f "kernel/msm-4.19/techpack/$d/Makefile" ]; then
-              echo "[+] techpack/$d/Makefile OK"
-            else
-              echo "[-] techpack/$d/Makefile MISSING"
-              false
-            fi
-          done
-
-          # 验证关键 symlink 可解析 (OOS 构建前提)
-          cd kernel/msm-4.19
+          # techpack 可编译性 (每个 techpack 子目录有 Makefile)、关键 symlink 可解析
+          # (arch/arm64/boot/dts/vendor、drivers/soc/oplus/system ...) 以及每条映射的落点,
+          # 都已由 Drivers/apply.py 按 Drivers/manifest.xml 校验, 这里不再重复检查。
           echo "::endgroup::"
-          for check in arch/arm64/boot/dts/vendor drivers/soc/oplus/system drivers/power/oplus fs/erofs drivers/input/touchscreen/oplus_touchscreen drivers/staging/fw-api drivers/staging/qcacld-3.0 drivers/staging/qca-wifi-host-cmn drivers/staging/utils; do
-            if [ -e "$check" ]; then
-              echo "[+] $check -> $(readlink -f $check)"
-            else
-              echo "[-] $check cannot resolve, OOS build will fail."
-              false
-            fi
-          done
 
       - name: Get Kernel Arch
         shell: bash
