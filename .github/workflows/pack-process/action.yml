@@ -80,6 +80,13 @@ runs:
             echo "[+] Packing kernel modules (.ko)..."
             mkdir -p tmp/modules/vendor/lib/modules
             find $GITHUB_WORKSPACE/kernel/msm-4.19/out/ -name "*.ko" -exec cp -fp {} tmp/modules/vendor/lib/modules/ \;
+            # OOS 侧 WiFi 模块的固定文件名是 qca_cld3_wlan.ko (qcacld Android.mk:
+            # WLAN_CHIPSET=qca_cld3 + LOCAL_DEV_NAME=wlan)。内核内构建只产出 wlan.ko,
+            # 这里按 ROM 期望的名字再放一份, 免得 ROM 继续去加载旧的 stock 模块。
+            if [ -f tmp/modules/vendor/lib/modules/wlan.ko ] && [ ! -f tmp/modules/vendor/lib/modules/qca_cld3_wlan.ko ]; then
+              cp -fp tmp/modules/vendor/lib/modules/wlan.ko tmp/modules/vendor/lib/modules/qca_cld3_wlan.ko
+              echo "[+] Added qca_cld3_wlan.ko (OOS expected WLAN module name)."
+            fi
 
             if [ "$(ls -A tmp/modules/vendor/lib/modules/ 2>/dev/null)" ]; then
               echo "[+] Found and copied kernel modules."

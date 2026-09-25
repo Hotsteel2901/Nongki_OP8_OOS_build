@@ -202,6 +202,12 @@ concatenated in that order.
   `susfs_*_no_su` inlines added to `susfs_def.h`.
 - `defconfig_oos.patch`: `CONFIG_WB_KERNEL_LOG=y` parked (config only — upstream
   `misc/Makefile`'s `obj-$(CONFIG_WB_KERNEL_LOG)` line stays commented out, so it is inert).
+- WLAN (2026-09-25, `test01`): `build-ready` now maps
+  `vendor/qcom/opensource/wlan/{fw-api,qcacld-3.0,qca-wifi-host-cmn,utils}` into
+  `drivers/staging/` (OnePlus manifest `<linkfile>` semantics) and adds the two
+  kbuild glue lines (as in luk1337's lineage-19.1 tree); `defconfig_oos.patch` sets
+  `CONFIG_QCA_CLD_WLAN=m`. Modules are packed by `PACK_KMODULES` as
+  `qca_cld3_wlan.ko` (the name OOS uses for the WiFi module) inside the AnyKernel3 zip.
 
 ---
 

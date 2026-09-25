@@ -66,7 +66,7 @@ env:
   PYTHON_VERSION: "3"
 
   PACK_METHOD: "Anykernel3"
-  PACK_KMODULES: "false"
+  PACK_KMODULES: "true"
 
   KERNELSU_METHOD: "shell"
 

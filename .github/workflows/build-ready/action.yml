@@ -72,6 +72,14 @@ runs:
               ln -sfn "../../../../$WLAN_DIR/$d" "kernel/msm-4.19/drivers/staging/$d"
               echo "[+] drivers/staging/$d -> $(readlink kernel/msm-4.19/drivers/staging/$d)"
             done
+            # 4) drivers/staging glue: 让 qcacld-3.0 进入 kbuild (与 luk1337 lineage-19.1
+            #    的两行一致)。qcacld 自带 KERNEL_BUILD 分支: 内核内构建时 MODNAME=wlan,
+            #    并从 ../qca-wifi-host-cmn、../fw-api 取源码, 正好是 3) 建立的链接布局。
+            STAGING_MK="kernel/msm-4.19/drivers/staging/Makefile"
+            STAGING_KCONF="kernel/msm-4.19/drivers/staging/Kconfig"
+            grep -q "CONFIG_QCA_CLD_WLAN" "$STAGING_MK" || printf "\nobj-\$(CONFIG_QCA_CLD_WLAN)\t+= qcacld-3.0/\n" >> "$STAGING_MK"
+            grep -q "drivers/staging/qcacld-3.0/Kconfig" "$STAGING_KCONF" || sed -i "/endif # STAGING/i\source \"drivers/staging/qcacld-3.0/Kconfig\"" "$STAGING_KCONF"
+            echo "[+] drivers/staging glue ready: $(grep -c 'CONFIG_QCA_CLD_WLAN' "$STAGING_MK") obj line(s), $(grep -c 'qcacld-3.0/Kconfig' "$STAGING_KCONF") source line(s)."
             rm -rf oos_vendor_tmp
             echo "[+] OOS vendor + techpack cloned."
           else
