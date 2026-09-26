@@ -1,0 +1,77 @@
+# Nongki_OP8_OOS_build
+
+为 **OnePlus 8 (instantnoodle, 4.19.157-perf+)** 的 **OxygenOS 13.1 (Android 13)** 内核提供自动化编译。
+是 [NonGKI_Kernel_Build_OP8](https://github.com/Hotsteel2901/NonGKI_Kernel_Build_OP8) 的衍生版，把内核源从
+LineageOS 23.2 (A16) 换成 **一加官方 OnePlus OSS 内核**。
+
+## ⚠️ 与 LineageOS 版本的关键差异
+
+一加 OSS 官方内核（`OnePlusOSS/android_kernel_oneplus_sm8250`，分支 `oneplus/sm8250_t_13.1_op8`，
+`4.19.157`）是**更老的 4.19 结构**，且**内核里没有设备树**：
+
+- `arch/arm64/boot/dts/vendor` 是指向 `../../../../../../vendor/qcom/proprietary/devicetree-4.19` 的 symlink
+- 有 86+ 个 symlink 指向 `vendor/oplus/kernel/*`（充电、触控、oplus_performance、网络等）
+- **这些需要从独立仓库获取：**
+  `OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250`（分支 `oneplus/sm8250_t_13.1_op8`）
+- 工作流会 clone 该仓库并按官方布局放置，使 symlink 可解析
+
+## 集成内容
+
+本构建为**原生（stock）**——不含 root（KernelSU/ReSukiSU）或 SUSFS。仅集成以下内容：
+
+| 组件 | 说明 |
+|---|---|
+| DroidSpaces | cgroup 前缀隐藏 + Non-GKI 配置 (含 USER_NS) |
+| Baseband Guard | 非 GKI / pre-5.1 LSM 风格 (`security_add_hooks_compat`, 无 `DEFINE_LSM`) |
+
+> **不集成 Re:Kernel**：OOS 13.1 自带 binder/冻结监控 **HANS**（`CONFIG_OPLUS_HANS=y`,
+> `drivers/staging/android/hans.c`），已覆盖 Re:Kernel 的冻结管理功能，再集成反而冗余
+> （且 Re:Kernel 的 `SIGNAL` 枚举与 `hans.h` 冲突）。
+
+## 使用方法
+
+1. **Fork 本仓库** 到你的 GitHub 账号
+2. **Settings → Actions → General → Workflow permissions** 选择 `Read and write permissions`
+3. 进入 **Actions** 页, 选择 `Build Kernel` 工作流, 点 **Run workflow** (或直接 push 触发)
+4. 构建完成后下载 zip, 用 AnyKernel3 方式刷入
+
+## 补丁说明 (Patches/)
+
+| 文件 | 内容 | 应用时机 |
+|---|---|---|
+| `Patch/defconfig_oos.patch` | BBG/DroidSpaces Non-GKI 配置 | 工作流步骤 |
+| `Droidspaces/oos_droidspaces.patch` | cgroup 前缀 + xt_qtaguid panic 修复 | 工作流步骤 |
+| Baseband Guard | 构建时 `setup.sh` 动态拉取（非 GKI 路径） | 工作流步骤 |
+
+> 所有 OOS 补丁基于内核提交 `1d2678a3548f`（OOS13.1 最终版, 4.19.157-perf）生成。
+
+## 补丁记录存档 (Patches/Archive/)
+
+完整开发记录与重生成指南（英文）：`Patches/Archive/README.md`
+- `0001-defconfig-oos.patch` / `0001-droidspaces-oos.patch`
+- 记录了 OOS 特有的非显而易见事实（设备树 symlink 深度、techpack 来自 modules_and_devicetree、
+  无 Re:Kernel/HANS、clang-19 KCFLAGS 引号）以及每个构建错误与修复，
+  便于后续者从当前进度续接。
+- 注：该存档早于本次切换为原生（无 root）之前，仍保留已移除的 SUSFS+ReSukiSU
+  相关记录作为历史资料，详见 `Patches/Archive/README.md`。
+
+## 关键配置项 (build-oneplus-8-los23-a16.yml)
+
+- `KERNEL_SOURCE/Branch`: 一加 OSS 官方仓库, `oneplus/sm8250_t_13.1_op8`
+- `VENDOR_SOURCE/Branch`: `android_kernel_modules_and_devicetree_oneplus_sm8250`, `oneplus/sm8250_t_13.1_op8`
+- `MERGE_CONFIG_FILES`: 空 — OOS defconfig 已内嵌 `CONFIG_OPLUS_SM8250_CHARGER` 等
+- `DEFCONFIG_NAME`: `vendor/kona-perf_defconfig`
+- DTB: 非 overlay 构建生成 `kona-mtp.dtb`（设备树 19821），由此构建 dtb.img
+
+## OOS vendor/devicetree 布局
+
+一加官方构建把内核放在某层级使 `arch/arm64/boot/dts/../../../../../../vendor` 能解析。
+本工作流 `device_kernel` 位于 `$GITHUB_WORKSPACE/device_kernel`，其 6 层上级是
+`$GITHUB_WORKSPACE`，故 `vendor` 放在 `$GITHUB_WORKSPACE/vendor`。
+`build-ready` clone modules_and_devicetree 仓库并把 `vendor/` 移到该处，然后校验关键 symlink。
+
+## 鸣谢
+
+[OnePlusOSS](https://github.com/OnePlusOSS) · [Re:Kernel](https://github.com/Sakion-Team/Re-Kernel) ·
+[Droidspaces](https://github.com/ravindu644/Droidspaces-OSS) · [Baseband-guard](https://github.com/vc-teahouse/Baseband-guard) ·
+[JackA1ltman/NonGKI_Kernel_Build_2nd](https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd)

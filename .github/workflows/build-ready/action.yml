@@ -1,0 +1,161 @@
+name: 'Preparation for the official start of the compilation steps.'
+
+runs:
+  using: 'composite'
+  steps:
+      - name: Get Kernel
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE
+
+          echo "::group::[+] Starting git clone kernel source code..."
+          # 内核放在 $GITHUB_WORKSPACE/kernel/msm-4.19 (深1层),
+          # 使 vendor symlink (../../../../../../vendor 从 dts 上溯6层) 能解析到 $GITHUB_WORKSPACE/vendor
+          mkdir -p kernel
+          git clone --recursive "${{ env.KERNEL_SOURCE }}" -b "${{ env.KERNEL_BRANCH }}" kernel/msm-4.19 --depth=1
+
+          if [[ -f "kernel/msm-4.19/.gitmodules" ]]; then
+            cd kernel/msm-4.19
+            git submodule init
+            git submodule update
+            cd ../../
+            echo "[+] Detected GitModules."
+
+          fi
+          echo "::endgroup::"
+          echo "[+] Kernel source code is cloned."
+
+          # Get Kernel Version
+
+          KERNEL_VERSION=$(head -n 3 $GITHUB_WORKSPACE/kernel/msm-4.19/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')
+          echo "KERNEL_VERSION=$(head -n 3 kernel/msm-4.19/Makefile | grep -E 'VERSION|PATCHLEVEL' | awk '{print $3}' | paste -sd '.')" >> $GITHUB_ENV
+          echo "FIRST_VERSION=$(echo "$KERNEL_VERSION" | awk -F '.' '{print $1}')" >> $GITHUB_ENV
+          echo "SECOND_VERSION=$(echo "$KERNEL_VERSION" | awk -F '.' '{print $2}')" >> $GITHUB_ENV
+
+      - name: Get OOS Vendor/Devicetree (modules_and_devicetree)
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE
+          echo "::group::[+] Starting git clone OOS vendor/devicetree..."
+          # modules_and_devicetree 仓库同时包含:
+          #   vendor/  (oplus kernel modules + kona DTS + 19821 devicetree)
+          #   kernel/msm-4.19/techpack/  (camera/display/video 源码, OOS 官方内核缺失的部分)
+          if [ -n "${{ env.VENDOR_SOURCE }}" ]; then
+            git clone --depth=1 "${{ env.VENDOR_SOURCE }}" -b "${{ env.VENDOR_BRANCH }}" oos_vendor_tmp
+            # 1) vendor -> $GITHUB_WORKSPACE/vendor (内核 vendor symlink 6层上级)
+            mv oos_vendor_tmp/vendor ./vendor
+            # 2) techpack -> 填充 OOS 官方内核的空 gitlink
+            for d in camera display video; do
+              if [ -d "oos_vendor_tmp/kernel/msm-4.19/techpack/$d" ]; then
+                rm -rf kernel/msm-4.19/techpack/$d
+                cp -r oos_vendor_tmp/kernel/msm-4.19/techpack/$d kernel/msm-4.19/techpack/$d
+                echo "[+] techpack/$d filled from modules_and_devicetree."
+              else
+                echo "[-] techpack/$d not found in modules_and_devicetree."
+                false
+              fi
+            done
+            rm -rf oos_vendor_tmp
+            echo "[+] OOS vendor + techpack cloned."
+          else
+            echo "[-] VENDOR_SOURCE not set."
+            false
+          fi
+
+          # 验证 techpack 子目录有 Makefile (可编译)
+          for d in camera display video; do
+            if [ -f "kernel/msm-4.19/techpack/$d/Makefile" ]; then
+              echo "[+] techpack/$d/Makefile OK"
+            else
+              echo "[-] techpack/$d/Makefile MISSING"
+              false
+            fi
+          done
+
+          # 验证关键 symlink 可解析 (OOS 构建前提)
+          cd kernel/msm-4.19
+          echo "::endgroup::"
+          for check in arch/arm64/boot/dts/vendor drivers/soc/oplus/system drivers/power/oplus fs/erofs drivers/input/touchscreen/oplus_touchscreen; do
+            if [ -e "$check" ]; then
+              echo "[+] $check -> $(readlink -f $check)"
+            else
+              echo "[-] $check cannot resolve, OOS build will fail."
+              false
+            fi
+          done
+
+      - name: Get Kernel Arch
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
+
+          if [[ -d "arch/arm64/configs" ]]; then
+            echo "KERNEL_ARCH=arm64" >> $GITHUB_ENV
+
+          else
+            echo "[-] Non-ARM64 Devies not supported!"
+            false
+
+          fi
+
+      - name: Get Packing Tools
+        shell: bash
+        run: |
+          # Set ${{ env.PACK_METHOD }}
+
+          if [[ "${{ env.PACK_METHOD }}" == "Anykernel3" ]]; then
+            cd $GITHUB_WORKSPACE/kernel/msm-4.19
+
+            if [[ -d "Anykernel3" ]]; then
+              echo "[+] Found Anykernel3 in Kernel!"
+
+            elif [[ "${{ env.AK3_SOURCE }}" == *"osm0sis/AnyKernel3.git" ]]; then
+              git clone "${{ env.AK3_SOURCE }}" -b "${{ env.AK3_BRANCH }}" Anykernel3
+              cd Anykernel3
+              git checkout dca9dc370838d919d56c1f59ec78b27a14a72c68
+              cd ../
+              echo "[+] Get Anykernel3 successfully!"
+
+            else
+              git clone "${{ env.AK3_SOURCE }}" -b "${{ env.AK3_BRANCH }}" Anykernel3 --depth=1
+
+            fi
+          elif [[ "${{ env.PACK_METHOD }}" == "MKBOOTIMG" ]] || [ "${{ env.DEFCONFIG_FROM_BOOT }}" == "true" ]; then
+            cd $GITHUB_WORKSPACE
+            git clone https://android.googlesource.com/platform/system/tools/mkbootimg $GITHUB_WORKSPACE/mkboottools -b main-kernel-build-2024 --depth=1
+            ${{ env.CURLX }} ${{ env.BOOT_SOURCE }} $GITHUB_WORKSPACE/boot_source_${{ env.DEVICE_NAME }}.img
+            echo "[+] Get MKBOOTIMG successfully!"
+            cd kernel/msm-4.19
+
+          else
+            echo "[-] Need packing method! "
+            false
+
+          fi
+
+          echo "PACK_METHOD=${{ env.PACK_METHOD }}" >> $GITHUB_ENV
+
+      - name: Get DEFCONFIG
+        if: env.DEFCONFIG_SOURCE != '' || env.DEFCONFIG_FROM_BOOT == 'true'
+        shell: bash
+        run: |
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
+
+          if [[ -n "${{ env.DEFCONFIG_SOURCE }}" ]]; then
+            ${{ env.CURLX }} ${{ env.DEFCONFIG_SOURCE }} kernel/msm-4.19/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+
+          elif [[ -z "${{ env.DEFCONFIG_ORIGIN_IMAGE }}" ]]; then
+            if [[ "${{ env.DEFCONFIG_FROM_BOOT }}" == "true" ]]; then
+                if [[ -f "${{ env.BOOT_SOURCE }}" ]]; then
+                    ${{ env.CURLX }} "${{ env.BOOT_SOURCE }}" $GITHUB_WORKSPACE/boot.img
+                    $GITHUB_WORKSPACE/mkboottools/unpack_bootimg.py --boot_img $GITHUB_WORKSPACE/boot.img
+                    mv $GITHUB_WORKSPACE/out/kernel $GITHUB_WORKSPACE/kernel/msm-4.19/Image
+                    $GITHUB_WORKSPACE/kernel/msm-4.19/scripts/extract-ikconfig $GITHUB_WORKSPACE/kernel/msm-4.19/Image > $GITHUB_WORKSPACE/kernel/msm-4.19/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+
+                fi
+            else
+                ${{ env.CURLX }} "${{ env.DEFCONFIG_ORIGIN_IMAGE }}" $GITHUB_WORKSPACE/kernel/msm-4.19/Image
+                $GITHUB_WORKSPACE/kernel/msm-4.19/scripts/extract-ikconfig $GITHUB_WORKSPACE/kernel/msm-4.19/Image > $GITHUB_WORKSPACE/kernel/msm-4.19/arch/"${{ env.KERNEL_ARCH }}"/configs/${{ env.DEFCONFIG_NAME }}
+
+            fi
+          fi

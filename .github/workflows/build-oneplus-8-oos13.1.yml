@@ -1,0 +1,201 @@
+name: Build Oneplus 8 (OxygenOS 13.1 A13) (Stock Kernel)
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+env:
+  # Device env
+  DEVICE_NAME : "oneplus_8"
+  DEVICE_CODENAME : "instantnoodle"
+
+  BRAND_SHOW_FLAG : "oneplus"
+
+  CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-android-"
+  # OOS 4.19.157 旧代码 + clang 19: 禁用新 clang 默认 -Werror 严格警告
+  # KCFLAGS 值必须用引号包裹(含空格), 否则 make 只取第一个参数
+  EXTRA_CMDS : 'KCFLAGS="-Wno-strict-prototypes -Wno-incompatible-function-pointer-types -Wno-deprecated-non-prototype -Wno-implicit-int -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast -Wno-implicit-function-declaration -Wno-unused-but-set-variable"'
+
+  # OOS 官方内核 (OnePlus OSS, 4.19.157) - 设备树在独立仓库
+  KERNEL_SOURCE : "https://github.com/OnePlusOSS/android_kernel_oneplus_sm8250.git"
+  KERNEL_BRANCH : "oneplus/sm8250_t_13.1_op8"
+
+  # OOS 官方 vendor/devicetree 仓库 (含 oplus 内核模块 + kona DTS + 19821 设备树
+  # + kernel/msm-4.19/techpack 的 camera/display/video 源码)
+  # symlink 指向 vendor/, 需按 OnePlus 官方目录布局放置
+  VENDOR_SOURCE : "https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8250.git"
+  VENDOR_BRANCH : "oneplus/sm8250_t_13.1_op8"
+
+  CLANG_SOURCE : "https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-Linux-X64.tar.xz"
+  CLANG_BRANCH : ""
+
+  GCC_GNU : false
+  GCC_64_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git"
+  GCC_64_BRANCH : "android12L-release"
+  GCC_32_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9.git"
+  GCC_32_BRANCH : "android12L-release"
+
+  DEFCONFIG_SOURCE: ""
+  DEFCONFIG_NAME : "vendor/kona-perf_defconfig"
+  DEFCONFIG_ORIGIN_IMAGE: ""
+  DEFCONFIG_FROM_BOOT: false
+
+  AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
+  AK3_BRANCH : "master"
+
+  BOOT_SOURCE : ""
+
+  NEED_DTBO : false
+  NEED_SAFE_DTBO : false
+
+  ROM_TEXT : "oos13.1_a13"
+
+  # Other env
+  PYTHON_VERSION: "3"
+
+  PACK_METHOD: "Anykernel3"
+  PACK_KMODULES: "false"
+
+  PATCHES_SOURCE: ""
+  PATCHES_BRANCH: ""
+
+  # DroidSpaces 配置已通过 defconfig_oos.patch 注入, 无需 build-process 再 merge droidspaces.config
+  DROIDSPACES_ENABLE: "false"
+  NOMOUNT_ENABLE: "false"
+
+  KERNEL_PATCH: "false"
+
+  BASEBAND_GUARD_ENABLE: "true"
+  BASEBAND_GUARD_BOOT: "false"
+
+  # OOS 设备树直接编译 (非overlay), 通过 OnePlus 官方 Makefile 生成
+  GENERATE_DTB: "false"
+  GENERATE_CHIP: "qcom"
+
+  # devicetree-4.19/19821/Makefile's non-overlay branch has an upstream OnePlus typo
+  # (dtb-$(CONFIG_ARCH_LITO) instead of CONFIG_ARCH_KONA), so on a Kona defconfig it
+  # silently builds nothing for 19821 (the real OnePlus 8 profile). CONFIG_BUILD_ARM64_DT_OVERLAY=y
+  # (set in defconfig_oos.patch) switches 19821 to its overlay branch instead, which uses
+  # CONFIG_ARCH_KONA correctly — matching luk1337 and LineageOS's own kona-perf_defconfig.
+  # HAVE_NO_DTBO hooks mkdtimg into the kernel's own Makefile so `make` builds dtbo.img
+  # natively as part of the default target; Pack Process already picks up dtbo.img if present.
+  HAVE_NO_DTBO: "true"
+  HAVE_NO_DTBO_TOOL: "false"
+
+  BUILD_DEBUGGER: "false"
+  SKIP_PATCH: "false"
+
+  # OOS defconfig 已内嵌 oplus 配置, 无需额外 merge oplus.config
+  BUILD_OTHER_CONFIG: "false"
+  MERGE_CONFIG_FILES: ""
+
+  FREE_MORE_SPACE: "false"
+
+jobs:
+  build-kernel:
+    name: Oneplus 8 (OxygenOS 13.1 A13) (Stock Kernel)
+    runs-on: ubuntu-24.04
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+
+    steps:
+      - name: ⏰ Checkout repository
+        uses: actions/checkout@v6
+
+      - name: ⌛️ Compilation environment preparation
+        uses: ./.github/workflows/build-env
+
+      - name: ⚙️ Get neccssary tools
+        uses: ./.github/workflows/build-ready
+
+      - name: 🏗️ Setup OOS vendor/devicetree layout
+        run: |
+          # OnePlus OOS 内核的 vendor symlink 指向 ../../../../../../vendor
+          # (从 arch/arm64/boot/dts 上溯 6 层), 需把 devicetree+oplus 源码放到对应位置
+          # 布局: <ROOT>/kernel_src/arch/arm64/boot/dts -> 6层 -> <ROOT>/vendor
+          # 本 workflow 中 msm-4.19 位于 $GITHUB_WORKSPACE/kernel/msm-4.19
+          # 其 6 层上级为 $GITHUB_WORKSPACE, 故 vendor 放在 $GITHUB_WORKSPACE/vendor
+          cd $GITHUB_WORKSPACE
+          if [ ! -d vendor ]; then
+            echo "[-] vendor/ not found, devicetree missing."
+            false
+          fi
+          # 验证关键 symlink 可解析 (devicetree + oplus kernel)
+          cd kernel/msm-4.19
+          for check in arch/arm64/boot/dts/vendor drivers/soc/oplus/system drivers/power/oplus fs/erofs; do
+            if [ -e "$check" ]; then
+              echo "[+] $check -> $(readlink -f $check)"
+            else
+              echo "[-] $check cannot resolve, OOS build will fail."
+              false
+            fi
+          done
+          echo "[+] OOS vendor/devicetree layout ready."
+
+      - name: 📌 Kernel version suffix (OOS)
+        run: |
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
+          echo "-g$(git rev-parse --short HEAD)-oos-hotsteel" > .scmversion
+          echo "[+] .scmversion written."
+
+      - name: 💿 Patch Kernel of Droidspaces (OOS)
+        run: |
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19/
+          cp /tmp/Patches/Droidspaces/oos_droidspaces.patch ./
+          patch -p1 < oos_droidspaces.patch || true
+          rm -f oos_droidspaces.patch
+          echo "[+] Patched DroidSpaces for OOS successfully."
+
+      - name: 🔒 Patch Kernel of Baseband Guard (OOS, non-GKI)
+        run: |
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19/
+          wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          echo "[+] Patched Baseband Guard for OOS successfully."
+
+      - name: 📝 Apply OOS defconfig fragment
+        run: |
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19/
+          cp /tmp/Patches/Patch/defconfig_oos.patch ./
+          patch -p1 < defconfig_oos.patch || true
+          rm -f defconfig_oos.patch
+          echo "[+] OOS defconfig applied."
+
+      - name: "[1⁺] Apply OnePlus native features"
+        run: |
+          # oplus_native_features.mk is included by the top Makefile, but its plain
+          # assignments are NOT exported to kbuild's per-directory sub-makes. On the
+          # OnePlus Android build these are environment variables. Without them, the
+          # OPLUS_FEATURE_* gates in mm/, drivers/scsi/ufs/ ... silently skip objects
+          # (ufsfeature, ufs_signal_quality, ufs_latency_hist, task_mem, process_mm_reclaim).
+          F="$GITHUB_WORKSPACE/kernel/msm-4.19/oplus_native_features.mk"
+          if [ ! -f "$F" ]; then
+            echo "[-] $F not found — check if OnePlus moved/renamed this file."
+            false
+          fi
+          grep -E '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*$' "$F" \
+            | grep -vE '^(OPLUS_NATIVE_FEATURE_SET|OPLUS_NATIVE_MACRO_FEATURES)=' >> "$GITHUB_ENV"
+          echo "[+] Exported $(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*$' "$F") variables from oplus_native_features.mk."
+
+      - name: 🚀 Build Process
+        uses: ./.github/workflows/build-process
+
+      - name: 🖼️ Generate DTB (OOS concat kona dtb variants)
+        run: |
+          cd $GITHUB_WORKSPACE/kernel/msm-4.19
+          DTB_DIR="out/arch/arm64/boot/dts/vendor/19821"
+          if [ -f "$DTB_DIR/kona-mtp.dtb" ]; then
+            cat "$DTB_DIR/kona-mtp.dtb" > out/arch/arm64/boot/dtb.img
+            echo "[+] Generated dtb.img from kona-mtp.dtb"
+          else
+            # 回退: 拼接 vendor 下所有 dtb (与 OnePlus 官方 AndroidKernel.mk 一致)
+            cat out/arch/arm64/boot/dts/vendor/*/*.dtb > out/arch/arm64/boot/dtb.img
+            echo "[+] Generated dtb.img (concat all vendor dtbs)"
+          fi
+
+      - name: 🔩 Pack Process
+        uses: ./.github/workflows/pack-process
+
+      - name: ✏️ Upload Artifacts
+        uses: ./.github/workflows/upload-files
